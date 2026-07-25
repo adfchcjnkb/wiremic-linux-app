@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -84,17 +85,23 @@ fun DeviceRow(device: DeviceInfo, busy: Boolean, onConnect: () -> Unit) {
 
 @Composable
 fun MicBadge(active: Boolean, size: androidx.compose.ui.unit.Dp = 96.dp) {
-    val infinite = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infinite.animateFloat(
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by infiniteTransition.animateFloat(
         initialValue = 0.75f,
         targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
         label = "pulseScale"
     )
-    val pulseAlpha by infinite.animateFloat(
+    val pulseAlpha by infiniteTransition.animateFloat(
         initialValue = 0.5f,
         targetValue = 0f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
         label = "pulseAlpha"
     )
 
