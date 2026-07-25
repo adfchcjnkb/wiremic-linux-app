@@ -1,0 +1,268 @@
+#include "AppController.hpp"
+
+#include <QDateTime>
+#include <QHostInfo>
+#include <QStandardPaths>
+#include <QSysInfo>
+#include <QUuid>
+
+#include <fstream>
+
+namespace wiremic::ui {
+
+namespace {
+
+QString DeviceStatusToString(network::DeviceStatus status) {
+  return status == network::DeviceStatus::Online
+             ? QStringLiteral("Online")
+             : QStringLiteral("Offline");
+}
+
+QString ConnectionStateToString(protocol::ConnectionState state) {
+  switch (state) {
+    case protocol::ConnectionState::Idle:
+      return QStringLiteral("Idle");
+    case protocol::ConnectionState::Discovering:
+      return QStringLiteral("Discovering");
+    case protocol::ConnectionState::RequestSent:
+      return QStringLiteral("RequestSent");
+    case protocol::ConnectionState::AwaitingApproval:
+      return QStringLiteral("AwaitingApproval");
+    case protocol::ConnectionState::Accepted:
+      return QStringLiteral("Accepted");
+    case protocol::ConnectionState::Streaming:
+      return QStringLiteral("Connected");
+    case protocol::ConnectionState::Disconnected:
+      return QStringLiteral("Disconnected");
+    case protocol::ConnectionState::Reconnecting:
+      return QStringLiteral("Reconnecting");
+  }
+  return QStringLiteral("Idle");
+}
+
+std::string GenerateOrLoadDeviceId(const std::filesystem::path& dataDir) {
+  const auto idPath = dataDir / "device_id";
+  std::error_code ec;
+  std::filesystem::create_directories(dataDir, ec);
+
+  if (std::filesystem::exists(idPath)) {
+    std::ifstream in(idPath);
+    std::string id;
+    std::getline(in, id);
+    if (!id.empty()) return id;
+  }
+
+  const auto newId =
+      QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+  std::ofstream out(idPath, std::ios::trunc);
+  out << newId;
+  return newId;
+}
+
+}  // namespace
+
+QVariantMap AppController::DeviceToVariant(const protocol::DeviceInfo& device,
+                                            const QString& status) {
+  QVariantMap map;
+  map["id"] = QString::fromStdString(device.id);
+  map["name"] = QString::fromStdString(device.name);
+  map["model"] = QString::fromStdString(device.model);
+  map["platform"] =
+      QString::fromStdString(protocol::ToString(device.platform));
+  map["ip"] = QString::fromStdString(device.ip);
+  map["connectionType"] =
+      QString::fromStdString(protocol::ToString(device.connectionType));
+  map["controlPort"] = device.controlPort;
+  if (!status.isEmpty()) map["status"] = status;
+  return map;
+}
+
+AppController::AppController(QObject* parent) : QObject(parent) {
+  const auto dataDir = std::filesystem::path(
+      QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+          .toStdString());
+
+  protocol::DeviceInfo localDevice;
+  localDevice.id = GenerateOrLoadDeviceId(dataDir);
+  localDevice.name = QHostInfo::localHostName().toStdString();
+  if (localDevice.name.empty()) localDevice.name = "Linux Desktop";
+  localDevice.model = QSysInfo::prettyProductName().toStdString();
+  localDevice.platform = protocol::Platform::Linux;
+  localDevice.connectionType = protocol::ConnectionType::Wifi;
+
+  core::ConnectionManagerSettings settings;
+  settings.autoConnect = false;
+  settings.rememberTrustedDevices = true;
+
+  manager_ = std::make_unique<core::ConnectionManager>(
+      localDevice, dataDir, settings, protocol::kDefaultControlPort);
+
+  connect(manager_.get(), &core::ConnectionManager::deviceListChanged, this,
+          &AppController::devicesChanged);
+
+  connect(
+      manager_.get(), &core::ConnectionManager::incomingRequestPending, this,
+      [this](protocol::ConnectRequest request, QString fingerprint) {
+        pendingRequest_ = request;
+        pendingRequestFingerprint_ = fingerprint;
+        appendLog(QStringLiteral("Incoming request from %1 (%2)")
+                      .arg(QString::fromStdString(request.device.name),
+                           QString::fromStdString(request.device.model)));
+        emit pendingRequestChanged();
+        emit incomingRequestPopupRequested();
+      });
+
+  connect(manager_.get(), &core::ConnectionManager::connectionStateChanged,
+          this, &AppController::connectionStateChanged);
+
+  connect(manager_.get(), &core::ConnectionManager::connectionEstablished,
+          this, [this](protocol::DeviceInfo device) {
+            appendLog(QStringLiteral("Connected to %1")
+                          .arg(QString::fromStdString(device.name)));
+            pendingRequest_.reset();
+            emit pendingRequestChanged();
+            emit trustedDevicesChanged();
+          });
+
+  connect(manager_.get(), &core::ConnectionManager::connectionClosed, this,
+          [this](protocol::DisconnectReason) {
+            appendLog(QStringLiteral("Connection closed"));
+          });
+
+  connect(manager_.get(), &core::ConnectionManager::connectionFailed, this,
+          [this](QString reason) {
+            lastError_ = reason;
+            appendLog(QStringLiteral("Connection failed: %1").arg(reason));
+            emit lastErrorChanged();
+          });
+
+  connect(manager_.get(), &core::ConnectionManager::errorOccurred, this,
+          [this](QString message) {
+            appendLog(QStringLiteral("Error: %1").arg(message));
+          });
+
+  if (!manager_->start()) {
+    appendLog(
+        QStringLiteral("Failed to start networking (port may be in use)"));
+  } else {
+    appendLog(QStringLiteral("WireMic started, listening on port %1")
+                  .arg(manager_->controlPort()));
+  }
+}
+
+AppController::~AppController() {
+  if (manager_) manager_->stop();
+}
+
+QVariantList AppController::devices() const {
+  QVariantList list;
+  for (const auto& device : manager_->discoveredDevices()) {
+    list.append(
+        DeviceToVariant(device.info, DeviceStatusToString(device.status)));
+  }
+  return list;
+}
+
+QVariantList AppController::trustedDevices() const {
+  QVariantList list;
+  for (const auto& device : manager_->trustedDevices()) {
+    QVariantMap map;
+    map["id"] = QString::fromStdString(device.deviceId);
+    map["name"] = QString::fromStdString(device.name);
+    map["fingerprint"] = QString::fromStdString(device.certFingerprint);
+    list.append(map);
+  }
+  return list;
+}
+
+QVariantList AppController::logMessages() const { return logMessages_; }
+
+QString AppController::connectionState() const {
+  auto state = manager_->activeConnection();
+  if (!state) return QStringLiteral("Idle");
+  return ConnectionStateToString(state->state);
+}
+
+bool AppController::hasActiveConnection() const {
+  return manager_->activeConnection().has_value();
+}
+
+QVariantMap AppController::activeDevice() const {
+  auto state = manager_->activeConnection();
+  if (!state) return {};
+  return DeviceToVariant(state->device);
+}
+
+QVariantMap AppController::pendingRequest() const {
+  if (!pendingRequest_) return {};
+  auto map = DeviceToVariant(pendingRequest_->device);
+  map["fingerprint"] = pendingRequestFingerprint_;
+  return map;
+}
+
+bool AppController::hasPendingRequest() const {
+  return pendingRequest_.has_value();
+}
+
+QString AppController::localDeviceName() const {
+  return QHostInfo::localHostName();
+}
+
+quint16 AppController::controlPort() const { return manager_->controlPort(); }
+
+bool AppController::autoConnect() const { return autoConnect_; }
+
+void AppController::setAutoConnect(bool value) {
+  if (autoConnect_ == value) return;
+  autoConnect_ = value;
+  emit settingsChanged();
+}
+
+bool AppController::rememberTrustedDevices() const {
+  return rememberTrustedDevices_;
+}
+
+void AppController::setRememberTrustedDevices(bool value) {
+  if (rememberTrustedDevices_ == value) return;
+  rememberTrustedDevices_ = value;
+  emit settingsChanged();
+}
+
+QString AppController::lastError() const { return lastError_; }
+
+void AppController::connectToDevice(const QString& deviceId) {
+  manager_->requestConnection(deviceId.toStdString());
+}
+
+void AppController::acceptPendingRequest() {
+  if (!pendingRequest_) return;
+  manager_->approveIncoming(pendingRequest_->requestId);
+}
+
+void AppController::rejectPendingRequest() {
+  if (!pendingRequest_) return;
+  manager_->rejectIncoming(pendingRequest_->requestId,
+                            protocol::RejectReason::RejectedByUser);
+  pendingRequest_.reset();
+  emit pendingRequestChanged();
+}
+
+void AppController::disconnectActive() { manager_->disconnectActive(); }
+
+void AppController::refreshDevices() { manager_->refreshDiscovery(); }
+
+void AppController::revokeTrust(const QString& deviceId) {
+  manager_->revokeTrust(deviceId.toStdString());
+  emit trustedDevicesChanged();
+}
+
+void AppController::appendLog(const QString& message) {
+  QVariantMap entry;
+  entry["timestamp"] = QDateTime::currentDateTime().toString("HH:mm:ss");
+  entry["message"] = message;
+  logMessages_.append(entry);
+  if (logMessages_.size() > 500) logMessages_.removeFirst();
+  emit logMessagesChanged();
+}
+
+}  // namespace wiremic::ui

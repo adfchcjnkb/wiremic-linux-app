@@ -1,0 +1,103 @@
+#include "Check.hpp"
+#include <iostream>
+
+#include "Protocol.hpp"
+
+using namespace wiremic::protocol;
+
+int main() {
+  AnnouncePacket announce;
+  announce.device.id = "d290f1ee-6c54-4b01-90e6-d701748f0851";
+  announce.device.name = "Artin's Pixel 8";
+  announce.device.model = "Pixel 8 Pro";
+  announce.device.platform = Platform::Android;
+  announce.device.ip = "192.168.1.34";
+  announce.device.connectionType = ConnectionType::Wifi;
+  announce.device.controlPort = 47600;
+
+  auto json1 = ToJson(announce);
+  auto parsed1 = ParseAnnounce(json1);
+  WIREMIC_CHECK(parsed1.has_value());
+  WIREMIC_CHECK(parsed1->device.id == announce.device.id);
+  WIREMIC_CHECK(parsed1->device.platform == Platform::Android);
+  WIREMIC_CHECK(parsed1->device.connectionType == ConnectionType::Wifi);
+  std::cout << "ANNOUNCE_OK: " << json1 << "\n";
+
+  ConnectRequest request;
+  request.requestId = "req-1";
+  request.device = announce.device;
+  request.certFingerprint = "sha256:ab12cd34";
+  request.capabilities.sampleRates = {48000, 44100};
+  request.capabilities.codec = AudioCodec::Opus;
+  request.capabilities.maxBitrateKbps = 128;
+
+  auto json2 = ToJson(request);
+  auto parsed2 = ParseConnectRequest(json2);
+  WIREMIC_CHECK(parsed2.has_value());
+  WIREMIC_CHECK(parsed2->capabilities.sampleRates.size() == 2);
+  WIREMIC_CHECK(parsed2->capabilities.sampleRates[0] == 48000);
+  std::cout << "CONNECT_REQUEST_OK: " << json2 << "\n";
+
+  ConnectResponse response;
+  response.requestId = "req-1";
+  response.accepted = true;
+  AudioSession session;
+  session.udpPort = 47700;
+  session.sampleRate = 48000;
+  session.channels = 1;
+  session.codec = AudioCodec::Opus;
+  session.bitrateKbps = 96;
+  session.frameSizeMs = 10;
+  for (size_t i = 0; i < session.sessionKey.size(); ++i) {
+    session.sessionKey[i] = static_cast<uint8_t>(i * 7 + 1);
+  }
+  response.session = session;
+
+  auto json3 = ToJson(response);
+  auto parsed3 = ParseConnectResponse(json3);
+  WIREMIC_CHECK(parsed3.has_value());
+  WIREMIC_CHECK(parsed3->session.has_value());
+  WIREMIC_CHECK(parsed3->session->sessionKey == session.sessionKey);
+  WIREMIC_CHECK(parsed3->session->udpPort == 47700);
+  std::cout << "CONNECT_RESPONSE_OK: " << json3 << "\n";
+
+  ConnectResponse rejection;
+  rejection.requestId = "req-2";
+  rejection.accepted = false;
+  rejection.reason = RejectReason::RejectedByUser;
+  auto json4 = ToJson(rejection);
+  auto parsed4 = ParseConnectResponse(json4);
+  WIREMIC_CHECK(parsed4.has_value());
+  WIREMIC_CHECK(!parsed4->accepted);
+  WIREMIC_CHECK(parsed4->reason == RejectReason::RejectedByUser);
+  WIREMIC_CHECK(!parsed4->session.has_value());
+  std::cout << "REJECTION_OK: " << json4 << "\n";
+
+  KeepAlive keepAlive{42};
+  auto kaJson = ToJson(keepAlive);
+  WIREMIC_CHECK(PeekMessageType(kaJson) == ControlMessageType::KeepAlive);
+  auto parsedKa = ParseKeepAlive(kaJson);
+  WIREMIC_CHECK(parsedKa.has_value());
+  WIREMIC_CHECK(parsedKa->sequence == 42);
+  std::cout << "KEEPALIVE_OK: " << kaJson << "\n";
+
+  KeepAliveAck keepAliveAck{42};
+  auto kaAckJson = ToJson(keepAliveAck);
+  WIREMIC_CHECK(PeekMessageType(kaAckJson) ==
+                ControlMessageType::KeepAliveAck);
+  auto parsedKaAck = ParseKeepAliveAck(kaAckJson);
+  WIREMIC_CHECK(parsedKaAck.has_value());
+  WIREMIC_CHECK(parsedKaAck->sequence == 42);
+  std::cout << "KEEPALIVE_ACK_OK: " << kaAckJson << "\n";
+
+  DisconnectMessage disconnect{DisconnectReason::Timeout};
+  auto discJson = ToJson(disconnect);
+  WIREMIC_CHECK(PeekMessageType(discJson) == ControlMessageType::Disconnect);
+  auto parsedDisc = ParseDisconnect(discJson);
+  WIREMIC_CHECK(parsedDisc.has_value());
+  WIREMIC_CHECK(parsedDisc->reason == DisconnectReason::Timeout);
+  std::cout << "DISCONNECT_OK: " << discJson << "\n";
+
+  std::cout << "ALL_TESTS_PASSED\n";
+  return 0;
+}

@@ -1,0 +1,66 @@
+#include "VirtualMicBackend.hpp"
+
+#include "PulseAudioVirtualMic.hpp"
+
+namespace wiremic::platform {
+
+namespace {
+
+class PipeWireBackend final : public VirtualMicBackend {
+ public:
+  explicit PipeWireBackend(VirtualMicConfig config) : impl_(std::move(config)) {}
+  bool start() override { return impl_.start(); }
+  void stop() override { impl_.stop(); }
+  [[nodiscard]] bool isRunning() const override { return impl_.isRunning(); }
+  void pushSamples(const int16_t* interleaved, size_t sampleCount) override {
+    impl_.pushSamples(interleaved, sampleCount);
+  }
+
+ private:
+  PipeWireVirtualMic impl_;
+};
+
+class PulseAudioBackend final : public VirtualMicBackend {
+ public:
+  explicit PulseAudioBackend(const VirtualMicConfig& config) : impl_(config) {}
+  bool start() override { return impl_.start(); }
+  void stop() override { impl_.stop(); }
+  [[nodiscard]] bool isRunning() const override { return impl_.isRunning(); }
+  void pushSamples(const int16_t* interleaved, size_t sampleCount) override {
+    impl_.pushSamples(interleaved, sampleCount);
+  }
+
+ private:
+  PulseAudioVirtualMic impl_;
+};
+
+}  // namespace
+
+AudioServerKind DetectAudioServer() {
+  if (PipeWireVirtualMic::IsPipeWireAvailable()) {
+    return AudioServerKind::PipeWire;
+  }
+  if (PulseAudioVirtualMic::IsPulseAudioAvailable()) {
+    return AudioServerKind::PulseAudio;
+  }
+  return AudioServerKind::None;
+}
+
+std::unique_ptr<VirtualMicBackend> CreateVirtualMic(
+    const VirtualMicConfig& config, AudioServerKind preferredKind) {
+  const auto kind = preferredKind == AudioServerKind::None
+                         ? DetectAudioServer()
+                         : preferredKind;
+
+  switch (kind) {
+    case AudioServerKind::PipeWire:
+      return std::make_unique<PipeWireBackend>(config);
+    case AudioServerKind::PulseAudio:
+      return std::make_unique<PulseAudioBackend>(config);
+    case AudioServerKind::None:
+      return nullptr;
+  }
+  return nullptr;
+}
+
+}  // namespace wiremic::platform

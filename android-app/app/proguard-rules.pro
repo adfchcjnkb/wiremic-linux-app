@@ -1,0 +1,3 @@
+-keep class com.wiremic.app.core.NativeBridge { *; }
+-keep class com.wiremic.app.core.NativeListener { *; }
+-keepclassmembers class com.wiremic.app.core.** { *; }
