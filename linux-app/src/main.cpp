@@ -6,9 +6,11 @@
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QFile>
+#include <QTimer>
 
 #include <cstdlib>
 #include <exception>
+#include <iostream>
 
 #include "MainWindow.hpp"
 
@@ -35,6 +37,7 @@ void LogMessageHandler(QtMsgType type, const QMessageLogContext& context,
           .arg(context.line);
 
   fprintf(stderr, "%s\n", qPrintable(line));
+  fflush(stderr);
 
   if (g_logFile && g_logFile->isOpen()) {
     QTextStream stream(g_logFile);
@@ -60,6 +63,7 @@ bool InitLogFile() {
 }  // namespace
 
 int main(int argc, char** argv) {
+  // Initialize logging
   const bool logFileReady = InitLogFile();
   qInstallMessageHandler(LogMessageHandler);
 
@@ -68,18 +72,29 @@ int main(int argc, char** argv) {
   }
 
   try {
+    qInfo("WireMic starting up");
+
+    // Create application
     QApplication app(argc, argv);
     app.setOrganizationName("WireMic");
     app.setApplicationName("WireMic");
     app.setApplicationDisplayName("WireMic");
-    app.setWindowIcon(QIcon(":/WireMic/resources/icons/app_icon.svg"));
+    
+    // Set icon
+    QIcon appIcon(":/WireMic/resources/icons/app_icon.svg");
+    if (!appIcon.isNull()) {
+      app.setWindowIcon(appIcon);
+    } else {
+      qWarning("Failed to load app icon");
+    }
+    
     app.setStyle("Fusion");
 
-    qInfo("WireMic starting up");
-
+    // Create and show main window
     wiremic::ui::MainWindow window;
     window.show();
 
+    // Process events
     const int result = app.exec();
     qInfo("WireMic exiting normally (code %d)", result);
     return result;
