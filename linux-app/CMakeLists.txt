@@ -15,8 +15,6 @@ pkg_check_modules(SPA REQUIRED IMPORTED_TARGET libspa-0.2)
 pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse-simple libpulse)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 
-add_subdirectory(../shared ${CMAKE_BINARY_DIR}/shared)
-
 # Security library
 add_library(wiremic_security STATIC
     src/core/security/CertificateManager.cpp
@@ -185,8 +183,6 @@ target_link_libraries(wiremic PRIVATE
     wiremic_protocol
     wiremic_security
     wiremic_network
-    PkgConfig::PIPEWIRE
-    PkgConfig::SPA
 )
 
 target_compile_features(wiremic PUBLIC cxx_std_20)
