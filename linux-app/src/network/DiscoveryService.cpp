@@ -33,18 +33,24 @@ bool DiscoveryService::start() {
         return false;
     }
 
-    connect(&socket_, &QUdpSocket::readyRead, this,
-            &DiscoveryService::onReadyRead);
+    running_ = true;
+    
+    announceTimer_.start(protocol::kAnnounceIntervalMs);
+    sweepTimer_.start(kSweepIntervalMs);
+    
     connect(&announceTimer_, &QTimer::timeout, this,
             &DiscoveryService::onAnnounceTimer);
     connect(&sweepTimer_, &QTimer::timeout, this,
             &DiscoveryService::onSweepTimer);
-
-    running_ = true;
-    announceTimer_.start(protocol::kAnnounceIntervalMs);
-    sweepTimer_.start(kSweepIntervalMs);
     
-    QTimer::singleShot(100, this, &DiscoveryService::sendAnnounce);
+    QTimer::singleShot(50, this, [this]() {
+        if (running_ && socket_.state() == QUdpSocket::BoundState) {
+            connect(&socket_, &QUdpSocket::readyRead, this,
+                    &DiscoveryService::onReadyRead, Qt::UniqueConnection);
+            sendAnnounce();
+        }
+    });
+    
     return true;
 }
 
@@ -53,16 +59,14 @@ void DiscoveryService::stop() {
     
     running_ = false;
     
-    disconnect(&socket_, &QUdpSocket::readyRead, this, &DiscoveryService::onReadyRead);
-    disconnect(&announceTimer_, &QTimer::timeout, this, &DiscoveryService::onAnnounceTimer);
-    disconnect(&sweepTimer_, &QTimer::timeout, this, &DiscoveryService::onSweepTimer);
+    socket_.disconnect();
+    socket_.close();
     
     announceTimer_.stop();
     sweepTimer_.stop();
     
-    if (socket_.state() == QUdpSocket::BoundState) {
-        socket_.close();
-    }
+    disconnect(&announceTimer_, &QTimer::timeout, this, &DiscoveryService::onAnnounceTimer);
+    disconnect(&sweepTimer_, &QTimer::timeout, this, &DiscoveryService::onSweepTimer);
     
     devices_.clear();
 }
@@ -84,7 +88,8 @@ std::vector<DiscoveredDevice> DiscoveryService::devices() const {
 }
 
 void DiscoveryService::sendAnnounce() {
-    if (!running_ || socket_.state() != QUdpSocket::BoundState) {
+    if (!running_) return;
+    if (socket_.state() != QUdpSocket::BoundState) {
         return;
     }
     
@@ -104,7 +109,12 @@ void DiscoveryService::sendAnnounce() {
 }
 
 void DiscoveryService::onReadyRead() {
-    if (!running_ || socket_.state() != QUdpSocket::BoundState) {
+    if (!running_) {
+        return;
+    }
+    
+    if (socket_.state() != QUdpSocket::BoundState) {
+        socket_.disconnect(&socket_, &QUdpSocket::readyRead, this, &DiscoveryService::onReadyRead);
         return;
     }
     
