@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <memory>
 
-#include "PipeWireVirtualMic.hpp"
+#include "VirtualMicConfig.hpp"
 
 namespace wiremic::platform {
 
@@ -20,7 +20,6 @@ class VirtualMicBackend {
 
 [[nodiscard]] AudioServerKind DetectAudioServer();
 [[nodiscard]] std::unique_ptr<VirtualMicBackend> CreateVirtualMic(
-    const VirtualMicConfig& config, AudioServerKind preferredKind =
-                                         AudioServerKind::None);
+    const VirtualMicConfig& config, AudioServerKind preferredKind = AudioServerKind::None);
 
 }  // namespace wiremic::platform
