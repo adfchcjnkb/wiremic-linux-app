@@ -1,3 +1,5 @@
+#!/bin/bash
+cat > linux-app/src/ui/MainWindow.cpp << 'EOC'
 #include "MainWindow.hpp"
 #include <QHBoxLayout>
 #include <QLabel>
@@ -203,3 +205,5 @@ void MainWindow::showEvent(QShowEvent* event) {
   QMainWindow::showEvent(event);
 }
 }  // namespace wiremic::ui
+EOC
+echo "MainWindow.cpp updated - paintEvent disabled!"
