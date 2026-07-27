@@ -2,12 +2,18 @@
 
 #include <cstdint>
 #include <string>
+#include <memory>
 
 struct pa_simple;
 
 namespace wiremic::platform {
 
-struct VirtualMicConfig;
+struct VirtualMicConfig {
+  std::string nodeName{"WireMic Virtual Microphone"};
+  std::string nodeDescription{"Wireless Mic (from Android)"};
+  uint32_t sampleRate{48000};
+  uint8_t channels{1};
+};
 
 class PulseAudioVirtualMic {
  public:
@@ -28,10 +34,10 @@ class PulseAudioVirtualMic {
  private:
   bool loadModules();
   void unloadModules();
+  bool runPactlCommand(const std::string& cmd, std::string& output);
+  int parseModuleId(const std::string& output);
 
-  std::string nodeName_;
-  uint32_t sampleRate_;
-  uint8_t channels_;
+  VirtualMicConfig config_;
   std::string sinkName_;
   std::string sourceName_;
   int nullSinkModuleId_{-1};

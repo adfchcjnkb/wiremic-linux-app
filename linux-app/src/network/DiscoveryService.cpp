@@ -9,56 +9,64 @@ using namespace std::chrono_literals;
 
 namespace {
 constexpr auto kSweepIntervalMs = 1000;
+constexpr int kMaxBindRetries = 5;
+constexpr int kBindRetryDelayMs = 200;
 }
 
 DiscoveryService::DiscoveryService(protocol::DeviceInfo localDevice,
                                     QObject* parent)
     : QObject(parent), localDevice_(std::move(localDevice)) {
-    connect(&socket_, &QUdpSocket::readyRead, this,
-            &DiscoveryService::onReadyRead, Qt::QueuedConnection);
 }
 
-DiscoveryService::~DiscoveryService() { stop(); }
+DiscoveryService::~DiscoveryService() { 
+    stop(); 
+}
 
 bool DiscoveryService::start() {
     if (running_) return true;
 
-    // Bind with retry
-    int retries = 3;
-    bool bound = false;
-    while (retries-- > 0 && !bound) {
+    bound_ = false;
+    retryCount_ = 0;
+
+    while (retryCount_ < kMaxBindRetries && !bound_) {
         if (socket_.bind(QHostAddress::AnyIPv4,
                         protocol::kDiscoveryBroadcastPort,
                         QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
-            bound = true;
+            bound_ = true;
             break;
         }
-        QTimer::singleShot(100, this, [](){});
+        retryCount_++;
+        QTimer::singleShot(kBindRetryDelayMs, this, [](){});
     }
 
-    if (!bound) {
-        emit errorOccurred(QStringLiteral("Failed to bind discovery socket: %1")
+    if (!bound_) {
+        emit errorOccurred(QStringLiteral("Failed to bind discovery socket after %1 attempts: %2")
+                            .arg(kMaxBindRetries)
                             .arg(socket_.errorString()));
         return false;
     }
 
     if (socket_.state() != QUdpSocket::BoundState) {
         emit errorOccurred(QStringLiteral("Socket not in bound state after bind attempt"));
+        socket_.close();
         return false;
     }
 
     running_ = true;
     
-    connect(&announceTimer_, &QTimer::timeout, this,
-            &DiscoveryService::onAnnounceTimer, Qt::QueuedConnection);
-    connect(&sweepTimer_, &QTimer::timeout, this,
-            &DiscoveryService::onSweepTimer, Qt::QueuedConnection);
+    connect(&socket_, &QUdpSocket::readyRead, 
+            this, &DiscoveryService::onReadyRead, Qt::UniqueConnection);
+    
+    connect(&announceTimer_, &QTimer::timeout, 
+            this, &DiscoveryService::onAnnounceTimer, Qt::UniqueConnection);
+    
+    connect(&sweepTimer_, &QTimer::timeout, 
+            this, &DiscoveryService::onSweepTimer, Qt::UniqueConnection);
 
     announceTimer_.start(protocol::kAnnounceIntervalMs);
     sweepTimer_.start(kSweepIntervalMs);
     
-    // First announce after a small delay
-    QTimer::singleShot(150, this, &DiscoveryService::sendAnnounce);
+    QTimer::singleShot(200, this, &DiscoveryService::sendAnnounce);
     
     return true;
 }
@@ -67,8 +75,8 @@ void DiscoveryService::stop() {
     if (!running_) return;
     
     running_ = false;
+    bound_ = false;
     
-    // Disconnect all signals
     disconnect(&socket_, nullptr, this, nullptr);
     disconnect(&announceTimer_, nullptr, this, nullptr);
     disconnect(&sweepTimer_, nullptr, this, nullptr);
@@ -84,10 +92,8 @@ void DiscoveryService::stop() {
 }
 
 void DiscoveryService::refreshNow() {
-    if (!running_) return;
-    if (socket_.state() == QUdpSocket::BoundState) {
-        sendAnnounce();
-    }
+    if (!running_ || !bound_) return;
+    sendAnnounce();
 }
 
 std::vector<DiscoveredDevice> DiscoveryService::devices() const {
@@ -100,12 +106,14 @@ std::vector<DiscoveredDevice> DiscoveryService::devices() const {
 }
 
 void DiscoveryService::sendAnnounce() {
-    if (!running_) {
+    if (!running_ || !bound_) {
         return;
     }
     
     if (socket_.state() != QUdpSocket::BoundState) {
-        emit errorOccurred(QStringLiteral("Socket not bound, cannot send announce"));
+        bound_ = false;
+        emit errorOccurred(QStringLiteral("Socket lost binding, attempting to recover"));
+        start();
         return;
     }
     
@@ -125,22 +133,17 @@ void DiscoveryService::sendAnnounce() {
 }
 
 void DiscoveryService::onReadyRead() {
-    if (!running_) {
+    if (!running_ || !bound_) {
         return;
     }
     
     if (socket_.state() != QUdpSocket::BoundState) {
-        // Try to recover
-        if (socket_.state() == QUdpSocket::UnconnectedState) {
-            socket_.bind(QHostAddress::AnyIPv4,
-                        protocol::kDiscoveryBroadcastPort,
-                        QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint);
-        }
+        bound_ = false;
         return;
     }
     
     while (socket_.hasPendingDatagrams()) {
-        const auto datagram = socket_.receiveDatagram();
+        QNetworkDatagram datagram = socket_.receiveDatagram();
         if (datagram.isValid()) {
             handlePacket(datagram.data(), datagram.senderAddress());
         }
@@ -183,7 +186,7 @@ void DiscoveryService::handlePacket(const QByteArray& data,
 }
 
 void DiscoveryService::onAnnounceTimer() {
-    if (running_ && socket_.state() == QUdpSocket::BoundState) {
+    if (running_ && bound_ && socket_.state() == QUdpSocket::BoundState) {
         sendAnnounce();
     }
 }

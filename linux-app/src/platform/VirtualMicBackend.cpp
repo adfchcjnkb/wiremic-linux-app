@@ -1,6 +1,7 @@
 #include "VirtualMicBackend.hpp"
 
 #include "PulseAudioVirtualMic.hpp"
+#include "PipeWireVirtualMic.hpp"
 
 namespace wiremic::platform {
 
@@ -8,7 +9,7 @@ namespace {
 
 class PipeWireBackend final : public VirtualMicBackend {
  public:
-  explicit PipeWireBackend(VirtualMicConfig config) : impl_(std::move(config)) {}
+  explicit PipeWireBackend(const VirtualMicConfig& config) : impl_(config) {}
   bool start() override { return impl_.start(); }
   void stop() override { impl_.stop(); }
   [[nodiscard]] bool isRunning() const override { return impl_.isRunning(); }
@@ -24,7 +25,7 @@ class PulseAudioBackend final : public VirtualMicBackend {
  public:
   explicit PulseAudioBackend(const VirtualMicConfig& config) : impl_(config) {}
   bool start() override { return impl_.start(); }
-  void stop() override { impl_.stop(); }
+  void stop() override { return impl_.stop(); }
   [[nodiscard]] bool isRunning() const override { return impl_.isRunning(); }
   void pushSamples(const int16_t* interleaved, size_t sampleCount) override {
     impl_.pushSamples(interleaved, sampleCount);

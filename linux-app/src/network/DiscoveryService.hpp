@@ -44,14 +44,13 @@ class DiscoveryService : public QObject {
   void deviceRemoved(const QString& deviceId);
   void errorOccurred(const QString& message);
 
- private slots:
-  void onReadyRead();
-  void onAnnounceTimer();
-  void onSweepTimer();
-
  private:
   void sendAnnounce();
   void handlePacket(const QByteArray& data, const QHostAddress& sender);
+  
+  void onReadyRead();
+  void onAnnounceTimer();
+  void onSweepTimer();
 
   protocol::DeviceInfo localDevice_;
   QUdpSocket socket_;
@@ -59,6 +58,8 @@ class DiscoveryService : public QObject {
   QTimer sweepTimer_;
   std::unordered_map<std::string, DiscoveredDevice> devices_;
   bool running_{false};
+  bool bound_{false};
+  int retryCount_{0};
 };
 
 }  // namespace wiremic::network

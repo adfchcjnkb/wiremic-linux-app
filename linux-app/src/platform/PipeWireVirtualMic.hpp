@@ -1,7 +1,9 @@
 #pragma once
 
+#include <pipewire/pipewire.h>
 #include <pipewire/stream.h>
 #include <spa/utils/hook.h>
+#include <spa/param/audio/format-utils.h>
 
 #include <cstdint>
 #include <memory>
@@ -23,7 +25,7 @@ struct VirtualMicConfig {
 
 class PipeWireVirtualMic {
  public:
-  explicit PipeWireVirtualMic(VirtualMicConfig config);
+  explicit PipeWireVirtualMic(const VirtualMicConfig& config);
   ~PipeWireVirtualMic();
 
   PipeWireVirtualMic(const PipeWireVirtualMic&) = delete;
@@ -42,7 +44,7 @@ class PipeWireVirtualMic {
   static void OnStreamStateChanged(void* userdata, pw_stream_state old_state,
                                     pw_stream_state new_state,
                                     const char* error);
-  void FillBuffer(int16_t* dst, uint32_t maxFrames, uint32_t& outFrames);
+  void fillBuffer(int16_t* dst, uint32_t maxFrames, uint32_t& outFrames);
 
   VirtualMicConfig config_;
   pw_thread_loop* loop_{nullptr};
