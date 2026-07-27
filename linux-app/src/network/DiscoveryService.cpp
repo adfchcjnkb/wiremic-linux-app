@@ -2,6 +2,7 @@
 
 #include <QNetworkDatagram>
 #include <QTimer>
+#include <QDebug>
 
 namespace wiremic::network {
 
@@ -28,6 +29,7 @@ bool DiscoveryService::start() {
     bound_ = false;
     retryCount_ = 0;
 
+    // Bind with retry
     while (retryCount_ < kMaxBindRetries && !bound_) {
         if (socket_.bind(QHostAddress::AnyIPv4,
                         protocol::kDiscoveryBroadcastPort,
@@ -36,6 +38,7 @@ bool DiscoveryService::start() {
             break;
         }
         retryCount_++;
+        qDebug() << "Bind attempt" << retryCount_ << "failed:" << socket_.errorString();
         QTimer::singleShot(kBindRetryDelayMs, this, [](){});
     }
 
@@ -54,19 +57,21 @@ bool DiscoveryService::start() {
 
     running_ = true;
     
+    // Connect signals with Qt::QueuedConnection to avoid race conditions
     connect(&socket_, &QUdpSocket::readyRead, 
-            this, &DiscoveryService::onReadyRead, Qt::UniqueConnection);
+            this, &DiscoveryService::onReadyRead, Qt::QueuedConnection);
     
     connect(&announceTimer_, &QTimer::timeout, 
-            this, &DiscoveryService::onAnnounceTimer, Qt::UniqueConnection);
+            this, &DiscoveryService::onAnnounceTimer, Qt::QueuedConnection);
     
     connect(&sweepTimer_, &QTimer::timeout, 
-            this, &DiscoveryService::onSweepTimer, Qt::UniqueConnection);
+            this, &DiscoveryService::onSweepTimer, Qt::QueuedConnection);
 
     announceTimer_.start(protocol::kAnnounceIntervalMs);
     sweepTimer_.start(kSweepIntervalMs);
     
-    QTimer::singleShot(200, this, &DiscoveryService::sendAnnounce);
+    // First announce after a delay to ensure socket is ready
+    QTimer::singleShot(250, this, &DiscoveryService::sendAnnounce);
     
     return true;
 }
@@ -77,6 +82,7 @@ void DiscoveryService::stop() {
     running_ = false;
     bound_ = false;
     
+    // Disconnect all signals
     disconnect(&socket_, nullptr, this, nullptr);
     disconnect(&announceTimer_, nullptr, this, nullptr);
     disconnect(&sweepTimer_, nullptr, this, nullptr);
@@ -93,7 +99,9 @@ void DiscoveryService::stop() {
 
 void DiscoveryService::refreshNow() {
     if (!running_ || !bound_) return;
-    sendAnnounce();
+    if (socket_.state() == QUdpSocket::BoundState) {
+        sendAnnounce();
+    }
 }
 
 std::vector<DiscoveredDevice> DiscoveryService::devices() const {
@@ -112,6 +120,7 @@ void DiscoveryService::sendAnnounce() {
     
     if (socket_.state() != QUdpSocket::BoundState) {
         bound_ = false;
+        qDebug() << "Socket lost binding, attempting to recover";
         emit errorOccurred(QStringLiteral("Socket lost binding, attempting to recover"));
         start();
         return;
@@ -127,6 +136,7 @@ void DiscoveryService::sendAnnounce() {
     const qint64 sent = socket_.writeDatagram(bytes, QHostAddress::Broadcast,
                                                protocol::kDiscoveryBroadcastPort);
     if (sent == -1) {
+        qDebug() << "Failed to send announce:" << socket_.errorString();
         emit errorOccurred(QStringLiteral("Failed to send announce: %1")
                             .arg(socket_.errorString()));
     }
@@ -139,6 +149,12 @@ void DiscoveryService::onReadyRead() {
     
     if (socket_.state() != QUdpSocket::BoundState) {
         bound_ = false;
+        qDebug() << "Socket not in BoundState in onReadyRead";
+        return;
+    }
+    
+    // Check if there are pending datagrams before reading
+    if (!socket_.hasPendingDatagrams()) {
         return;
     }
     

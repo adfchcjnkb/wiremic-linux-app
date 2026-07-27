@@ -44,13 +44,14 @@ class DiscoveryService : public QObject {
   void deviceRemoved(const QString& deviceId);
   void errorOccurred(const QString& message);
 
- private:
-  void sendAnnounce();
-  void handlePacket(const QByteArray& data, const QHostAddress& sender);
-  
+ private slots:
   void onReadyRead();
   void onAnnounceTimer();
   void onSweepTimer();
+
+ private:
+  void sendAnnounce();
+  void handlePacket(const QByteArray& data, const QHostAddress& sender);
 
   protocol::DeviceInfo localDevice_;
   QUdpSocket socket_;
