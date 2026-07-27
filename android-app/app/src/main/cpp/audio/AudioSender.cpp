@@ -140,8 +140,32 @@ aaudio_data_callback_result_t AudioSender::handleAudioData(
     const int16_t* frames, int32_t numFrames) {
   if (!running_ || socketFd_ < 0) return AAUDIO_CALLBACK_RESULT_CONTINUE;
 
-  const auto opusPayload = encoder_.Encode(frames, numFrames);
-  if (opusPayload.empty()) return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  if (frames == nullptr || numFrames <= 0) {
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  }
+
+  if (numFrames != frameSamples_) {
+    if (errorCallback_) {
+      errorCallback_("AAudio frame count mismatch: expected " + 
+                      std::to_string(frameSamples_) + 
+                      " got " + std::to_string(numFrames));
+    }
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  }
+
+  std::vector<uint8_t> opusPayload;
+  try {
+    opusPayload = encoder_.Encode(frames, numFrames);
+  } catch (const std::exception& e) {
+    if (errorCallback_) {
+      errorCallback_(std::string("Opus encode error: ") + e.what());
+    }
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  }
+
+  if (opusPayload.empty()) {
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  }
 
   const auto nowMs = static_cast<uint32_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(

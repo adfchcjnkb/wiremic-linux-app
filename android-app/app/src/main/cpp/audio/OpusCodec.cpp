@@ -31,6 +31,10 @@ OpusFrameEncoder::~OpusFrameEncoder() {
 
 std::vector<uint8_t> OpusFrameEncoder::Encode(const int16_t* pcm,
                                                int frameSamples) {
+  if (pcm == nullptr || frameSamples <= 0) {
+    return std::vector<uint8_t>();
+  }
+  
   std::vector<uint8_t> output(1275);
   const int bytesWritten =
       opus_encode(encoder_, pcm, frameSamples, output.data(),
@@ -59,6 +63,10 @@ OpusFrameDecoder::~OpusFrameDecoder() {
 std::vector<int16_t> OpusFrameDecoder::Decode(const uint8_t* data,
                                                size_t length,
                                                int frameSamples) {
+  if (data == nullptr || length == 0 || frameSamples <= 0) {
+    return std::vector<int16_t>();
+  }
+  
   std::vector<int16_t> pcm(static_cast<size_t>(frameSamples) *
                             static_cast<size_t>(channels_));
   const int decodedSamples =
@@ -73,6 +81,10 @@ std::vector<int16_t> OpusFrameDecoder::Decode(const uint8_t* data,
 }
 
 std::vector<int16_t> OpusFrameDecoder::DecodePacketLoss(int frameSamples) {
+  if (frameSamples <= 0) {
+    return std::vector<int16_t>();
+  }
+  
   std::vector<int16_t> pcm(static_cast<size_t>(frameSamples) *
                             static_cast<size_t>(channels_));
   const int decodedSamples =
