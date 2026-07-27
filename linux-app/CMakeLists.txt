@@ -15,19 +15,6 @@ pkg_check_modules(SPA REQUIRED IMPORTED_TARGET libspa-0.2)
 pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse-simple libpulse)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 
-# برای اطمینان از پیدا شدن هدرهای Qt
-find_path(QT6_CORE_INCLUDE_DIR
-    NAMES QtCore/QtCore
-    PATHS /usr/include/qt6
-    REQUIRED
-)
-
-find_path(QT6_NETWORK_INCLUDE_DIR
-    NAMES QtNetwork/QtNetwork
-    PATHS /usr/include/qt6
-    REQUIRED
-)
-
 add_subdirectory(../shared ${CMAKE_BINARY_DIR}/shared)
 
 # Security library
@@ -38,7 +25,6 @@ add_library(wiremic_security STATIC
 
 target_include_directories(wiremic_security PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core/security
-    ${QT6_CORE_INCLUDE_DIR}
 )
 
 target_link_libraries(wiremic_security PUBLIC
@@ -59,8 +45,6 @@ add_library(wiremic_network STATIC
 target_include_directories(wiremic_network PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/network
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core/security
-    ${QT6_CORE_INCLUDE_DIR}
-    ${QT6_NETWORK_INCLUDE_DIR}
 )
 
 target_link_libraries(wiremic_network PUBLIC
@@ -83,7 +67,6 @@ add_library(wiremic_platform STATIC
 
 target_include_directories(wiremic_platform PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
-    ${QT6_CORE_INCLUDE_DIR}
     ${PIPEWIRE_INCLUDE_DIRS}
     ${SPA_INCLUDE_DIRS}
 )
@@ -108,7 +91,6 @@ add_library(wiremic_audio STATIC
 
 target_include_directories(wiremic_audio PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
-    ${QT6_CORE_INCLUDE_DIR}
 )
 
 target_link_libraries(wiremic_audio PUBLIC
@@ -127,8 +109,6 @@ add_library(wiremic_core STATIC
 
 target_include_directories(wiremic_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
-    ${QT6_CORE_INCLUDE_DIR}
-    ${QT6_NETWORK_INCLUDE_DIR}
 )
 
 target_link_libraries(wiremic_core PUBLIC
@@ -190,8 +170,6 @@ target_include_directories(wiremic PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages
-    ${QT6_CORE_INCLUDE_DIR}
-    ${QT6_NETWORK_INCLUDE_DIR}
     ${PIPEWIRE_INCLUDE_DIRS}
     ${SPA_INCLUDE_DIRS}
 )
@@ -232,10 +210,7 @@ if(WIREMIC_BUILD_TESTS)
         FILES
             resources/icons/icon_dashboard.svg
     )
-    target_include_directories(wiremic_widget_interaction_test PRIVATE 
-        src/ui
-        ${QT6_CORE_INCLUDE_DIR}
-    )
+    target_include_directories(wiremic_widget_interaction_test PRIVATE src/ui)
     target_link_libraries(wiremic_widget_interaction_test PRIVATE
         Qt6::Widgets Qt6::Svg Qt6::Test)
     add_test(NAME widget_interaction COMMAND wiremic_widget_interaction_test -platform offscreen)
@@ -257,10 +232,7 @@ if(WIREMIC_BUILD_TESTS)
             resources/icons/icon_phone.svg
             resources/icons/icon_desktop.svg
     )
-    target_include_directories(wiremic_icon_distinctness_test PRIVATE 
-        src/ui
-        ${QT6_CORE_INCLUDE_DIR}
-    )
+    target_include_directories(wiremic_icon_distinctness_test PRIVATE src/ui)
     target_link_libraries(wiremic_icon_distinctness_test PRIVATE
         Qt6::Widgets Qt6::Svg Qt6::Test)
     add_test(NAME icon_distinctness COMMAND wiremic_icon_distinctness_test -platform offscreen)
