@@ -1,6 +1,7 @@
 #include "DiscoveryService.hpp"
 
 #include <QNetworkDatagram>
+#include <QTimer>
 
 namespace wiremic::network {
 
@@ -13,6 +14,8 @@ constexpr auto kSweepIntervalMs = 1000;
 DiscoveryService::DiscoveryService(protocol::DeviceInfo localDevice,
                                     QObject* parent)
     : QObject(parent), localDevice_(std::move(localDevice)) {
+    connect(&socket_, &QUdpSocket::readyRead, this,
+            &DiscoveryService::onReadyRead, Qt::QueuedConnection);
 }
 
 DiscoveryService::~DiscoveryService() { stop(); }
@@ -20,9 +23,20 @@ DiscoveryService::~DiscoveryService() { stop(); }
 bool DiscoveryService::start() {
     if (running_) return true;
 
-    if (!socket_.bind(QHostAddress::AnyIPv4,
-                     protocol::kDiscoveryBroadcastPort,
-                     QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+    // Bind with retry
+    int retries = 3;
+    bool bound = false;
+    while (retries-- > 0 && !bound) {
+        if (socket_.bind(QHostAddress::AnyIPv4,
+                        protocol::kDiscoveryBroadcastPort,
+                        QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+            bound = true;
+            break;
+        }
+        QTimer::singleShot(100, this, [](){});
+    }
+
+    if (!bound) {
         emit errorOccurred(QStringLiteral("Failed to bind discovery socket: %1")
                             .arg(socket_.errorString()));
         return false;
@@ -35,21 +49,16 @@ bool DiscoveryService::start() {
 
     running_ = true;
     
+    connect(&announceTimer_, &QTimer::timeout, this,
+            &DiscoveryService::onAnnounceTimer, Qt::QueuedConnection);
+    connect(&sweepTimer_, &QTimer::timeout, this,
+            &DiscoveryService::onSweepTimer, Qt::QueuedConnection);
+
     announceTimer_.start(protocol::kAnnounceIntervalMs);
     sweepTimer_.start(kSweepIntervalMs);
     
-    connect(&announceTimer_, &QTimer::timeout, this,
-            &DiscoveryService::onAnnounceTimer);
-    connect(&sweepTimer_, &QTimer::timeout, this,
-            &DiscoveryService::onSweepTimer);
-    
-    QTimer::singleShot(50, this, [this]() {
-        if (running_ && socket_.state() == QUdpSocket::BoundState) {
-            connect(&socket_, &QUdpSocket::readyRead, this,
-                    &DiscoveryService::onReadyRead, Qt::UniqueConnection);
-            sendAnnounce();
-        }
-    });
+    // First announce after a small delay
+    QTimer::singleShot(150, this, &DiscoveryService::sendAnnounce);
     
     return true;
 }
@@ -59,14 +68,17 @@ void DiscoveryService::stop() {
     
     running_ = false;
     
-    socket_.disconnect();
-    socket_.close();
+    // Disconnect all signals
+    disconnect(&socket_, nullptr, this, nullptr);
+    disconnect(&announceTimer_, nullptr, this, nullptr);
+    disconnect(&sweepTimer_, nullptr, this, nullptr);
     
     announceTimer_.stop();
     sweepTimer_.stop();
     
-    disconnect(&announceTimer_, &QTimer::timeout, this, &DiscoveryService::onAnnounceTimer);
-    disconnect(&sweepTimer_, &QTimer::timeout, this, &DiscoveryService::onSweepTimer);
+    if (socket_.state() == QUdpSocket::BoundState) {
+        socket_.close();
+    }
     
     devices_.clear();
 }
@@ -88,8 +100,12 @@ std::vector<DiscoveredDevice> DiscoveryService::devices() const {
 }
 
 void DiscoveryService::sendAnnounce() {
-    if (!running_) return;
+    if (!running_) {
+        return;
+    }
+    
     if (socket_.state() != QUdpSocket::BoundState) {
+        emit errorOccurred(QStringLiteral("Socket not bound, cannot send announce"));
         return;
     }
     
@@ -114,7 +130,12 @@ void DiscoveryService::onReadyRead() {
     }
     
     if (socket_.state() != QUdpSocket::BoundState) {
-        socket_.disconnect(&socket_, &QUdpSocket::readyRead, this, &DiscoveryService::onReadyRead);
+        // Try to recover
+        if (socket_.state() == QUdpSocket::UnconnectedState) {
+            socket_.bind(QHostAddress::AnyIPv4,
+                        protocol::kDiscoveryBroadcastPort,
+                        QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint);
+        }
         return;
     }
     
