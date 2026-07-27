@@ -43,6 +43,16 @@ ControlServer::ControlServer(security::CertificateManager& certificateManager,
 }
 
 bool ControlServer::start() {
+  if (!QSslSocket::supportsSsl() ||
+      QSslSocket::activeBackend() != QStringLiteral("openssl")) {
+    emit errorOccurred(QStringLiteral(
+        "No functional TLS backend available (active backend: %1). "
+        "libssl/libcrypto may be missing or fail to load — refusing to "
+        "start an insecure control server.")
+                            .arg(QSslSocket::activeBackend()));
+    return false;
+  }
+
   if (!server_.listen(QHostAddress::Any, port_)) {
     emit errorOccurred(QStringLiteral("Failed to listen on port %1: %2")
                             .arg(port_)
@@ -99,11 +109,26 @@ void ControlServer::onReadyRead() {
   auto it = sessions_.find(socket);
   if (it == sessions_.end()) return;
 
+  if (!socket->isEncrypted()) {
+    emit errorOccurred(QStringLiteral(
+        "Rejected data on a socket that never completed a TLS handshake "
+        "(TLS backend may be unavailable)"));
+    socket->abort();
+    return;
+  }
+
   const QByteArray data = socket->readAll();
   it->second.framer.Feed(data.constData(), static_cast<size_t>(data.size()));
 
-  while (auto message = it->second.framer.NextMessage()) {
-    processMessage(socket, *message);
+  try {
+    while (auto message = it->second.framer.NextMessage()) {
+      processMessage(socket, *message);
+    }
+  } catch (const std::exception& e) {
+    emit errorOccurred(
+        QStringLiteral("Malformed control message, closing connection: %1")
+            .arg(e.what()));
+    socket->abort();
   }
 }
 

@@ -50,13 +50,19 @@ void AudioReceiver::onReadyRead() {
     const auto datagram = socket_.receiveDatagram();
     const auto data = datagram.data();
 
-    auto decrypted = AudioPacketCodec::Decrypt(
-        key_, reinterpret_cast<const uint8_t*>(data.constData()),
-        static_cast<size_t>(data.size()));
-    if (!decrypted) continue;
+    try {
+      auto decrypted = AudioPacketCodec::Decrypt(
+          key_, reinterpret_cast<const uint8_t*>(data.constData()),
+          static_cast<size_t>(data.size()));
+      if (!decrypted) continue;
 
-    jitterBuffer_.Push(decrypted->sequence, std::move(decrypted->opusPayload),
-                        decrypted->dtx, std::chrono::steady_clock::now());
+      jitterBuffer_.Push(decrypted->sequence,
+                          std::move(decrypted->opusPayload), decrypted->dtx,
+                          std::chrono::steady_clock::now());
+    } catch (const std::exception& e) {
+      emit errorOccurred(
+          QStringLiteral("Dropped malformed audio packet: %1").arg(e.what()));
+    }
   }
 }
 
@@ -68,15 +74,41 @@ void AudioReceiver::onPlayoutTick() {
       return;
 
     case JitterPopResult::Ready: {
-      auto pcm = decoder_->Decode(outcome.payload.data(),
-                                   outcome.payload.size(), frameSamples_);
-      emit pcmFrameReady(std::move(pcm), false);
+      try {
+        auto pcm = decoder_->Decode(outcome.payload.data(),
+                                     outcome.payload.size(), frameSamples_);
+        emit pcmFrameReady(std::move(pcm), false);
+      } catch (const std::exception& e) {
+        emit errorOccurred(
+            QStringLiteral("Opus decode failed, concealing frame: %1")
+                .arg(e.what()));
+        try {
+          auto pcm = decoder_->DecodePacketLoss(frameSamples_);
+          emit pcmFrameReady(std::move(pcm), true);
+        } catch (const std::exception&) {
+          std::vector<int16_t> silence(
+              static_cast<size_t>(frameSamples_) *
+                  static_cast<size_t>(channels_),
+              0);
+          emit pcmFrameReady(std::move(silence), true);
+        }
+      }
       return;
     }
 
     case JitterPopResult::Loss: {
-      auto pcm = decoder_->DecodePacketLoss(frameSamples_);
-      emit pcmFrameReady(std::move(pcm), true);
+      try {
+        auto pcm = decoder_->DecodePacketLoss(frameSamples_);
+        emit pcmFrameReady(std::move(pcm), true);
+      } catch (const std::exception& e) {
+        emit errorOccurred(
+            QStringLiteral("Opus PLC failed, emitting silence: %1")
+                .arg(e.what()));
+        std::vector<int16_t> silence(static_cast<size_t>(frameSamples_) *
+                                          static_cast<size_t>(channels_),
+                                      0);
+        emit pcmFrameReady(std::move(silence), true);
+      }
       return;
     }
 

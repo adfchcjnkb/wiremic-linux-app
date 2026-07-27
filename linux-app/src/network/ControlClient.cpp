@@ -54,6 +54,16 @@ ControlClient::ControlClient(security::CertificateManager& certificateManager,
 
 void ControlClient::connectToDevice(const QString& host, quint16 port,
                                      protocol::ConnectRequest request) {
+  if (!QSslSocket::supportsSsl() ||
+      QSslSocket::activeBackend() != QStringLiteral("openssl")) {
+    emit errorOccurred(QStringLiteral(
+        "No functional TLS backend available (active backend: %1) — "
+        "refusing to connect insecurely")
+                            .arg(QSslSocket::activeBackend()));
+    emit timedOut(QString::fromStdString(request.requestId));
+    return;
+  }
+
   pendingRequest_ = std::move(request);
   sessionActive_ = false;
   keepAliveSequence_ = 0;
@@ -91,50 +101,64 @@ void ControlClient::onEncrypted() {
 }
 
 void ControlClient::onReadyRead() {
+  if (!socket_.isEncrypted()) {
+    emit errorOccurred(QStringLiteral(
+        "Rejected data on a socket that never completed a TLS handshake"));
+    socket_.abort();
+    return;
+  }
+
   const QByteArray data = socket_.readAll();
   framer_.Feed(data.constData(), static_cast<size_t>(data.size()));
 
-  while (auto message = framer_.NextMessage()) {
-    const auto type = protocol::PeekMessageType(*message);
+  try {
+    while (auto message = framer_.NextMessage()) {
+      const auto type = protocol::PeekMessageType(*message);
 
-    if (type == protocol::ControlMessageType::ConnectResponse) {
-      auto response = protocol::ParseConnectResponse(*message);
-      if (!response) {
-        emit errorOccurred(QStringLiteral("Received malformed response"));
+      if (type == protocol::ControlMessageType::ConnectResponse) {
+        auto response = protocol::ParseConnectResponse(*message);
+        if (!response) {
+          emit errorOccurred(QStringLiteral("Received malformed response"));
+          continue;
+        }
+        if (response->requestId == pendingRequest_.requestId) {
+          timeoutTimer_.stop();
+          if (response->accepted) {
+            sessionActive_ = true;
+            missedKeepAlives_ = 0;
+            keepAliveTimer_.start(protocol::kKeepaliveIntervalMs);
+          }
+        }
+        emit responseReceived(*response);
         continue;
       }
-      if (response->requestId == pendingRequest_.requestId) {
-        timeoutTimer_.stop();
-        if (response->accepted) {
-          sessionActive_ = true;
+
+      if (type == protocol::ControlMessageType::KeepAliveAck) {
+        auto ack = protocol::ParseKeepAliveAck(*message);
+        if (ack) {
+          lastAckedSequence_ = ack->sequence;
           missedKeepAlives_ = 0;
-          keepAliveTimer_.start(protocol::kKeepaliveIntervalMs);
         }
+        continue;
       }
-      emit responseReceived(*response);
-      continue;
-    }
 
-    if (type == protocol::ControlMessageType::KeepAliveAck) {
-      auto ack = protocol::ParseKeepAliveAck(*message);
-      if (ack) {
-        lastAckedSequence_ = ack->sequence;
-        missedKeepAlives_ = 0;
+      if (type == protocol::ControlMessageType::Disconnect) {
+        auto disconnect = protocol::ParseDisconnect(*message);
+        sessionActive_ = false;
+        keepAliveTimer_.stop();
+        emit remoteDisconnected(disconnect
+                                     ? disconnect->reason
+                                     : protocol::DisconnectReason::RemoteShutdown);
+        continue;
       }
-      continue;
-    }
 
-    if (type == protocol::ControlMessageType::Disconnect) {
-      auto disconnect = protocol::ParseDisconnect(*message);
-      sessionActive_ = false;
-      keepAliveTimer_.stop();
-      emit remoteDisconnected(disconnect
-                                   ? disconnect->reason
-                                   : protocol::DisconnectReason::RemoteShutdown);
-      continue;
+      emit errorOccurred(QStringLiteral("Received unexpected control message"));
     }
-
-    emit errorOccurred(QStringLiteral("Received unexpected control message"));
+  } catch (const std::exception& e) {
+    emit errorOccurred(
+        QStringLiteral("Malformed control message, closing connection: %1")
+            .arg(e.what()));
+    socket_.abort();
   }
 }
 

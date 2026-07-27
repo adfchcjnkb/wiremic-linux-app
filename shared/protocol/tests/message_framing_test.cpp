@@ -51,6 +51,32 @@ int main() {
     std::cout << "OVERSIZE_REJECTED_OK\n";
   }
 
+  {
+    MessageFramer framer;
+    std::string oversizedHeader;
+    const uint32_t fakeLength = 0xFFFFFFFF;
+    oversizedHeader.push_back(static_cast<char>((fakeLength >> 24) & 0xFF));
+    oversizedHeader.push_back(static_cast<char>((fakeLength >> 16) & 0xFF));
+    oversizedHeader.push_back(static_cast<char>((fakeLength >> 8) & 0xFF));
+    oversizedHeader.push_back(static_cast<char>(fakeLength & 0xFF));
+    oversizedHeader.append("garbage-that-is-not-real-json");
+
+    framer.Feed(oversizedHeader.data(), oversizedHeader.size());
+
+    bool threw = false;
+    bool callerRecoveredGracefully = false;
+    try {
+      auto message = framer.NextMessage();
+      (void)message;
+    } catch (const std::length_error&) {
+      threw = true;
+      callerRecoveredGracefully = true;
+    }
+    WIREMIC_CHECK(threw);
+    WIREMIC_CHECK(callerRecoveredGracefully);
+    std::cout << "OVERSIZED_INCOMING_LENGTH_THROWS_CATCHABLE_OK\n";
+  }
+
   std::cout << "FRAMING_TESTS_PASSED\n";
   return 0;
 }

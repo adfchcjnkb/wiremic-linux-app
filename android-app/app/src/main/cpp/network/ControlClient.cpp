@@ -241,31 +241,38 @@ void ControlClient::run(std::string host, uint16_t port,
     const int received = SSL_read(ssl_, buffer, sizeof(buffer));
     if (received > 0) {
       framer_.Feed(buffer, static_cast<size_t>(received));
-      while (auto message = framer_.NextMessage()) {
-        const auto type = protocol::PeekMessageType(*message);
+      try {
+        while (auto message = framer_.NextMessage()) {
+          const auto type = protocol::PeekMessageType(*message);
 
-        if (type == protocol::ControlMessageType::ConnectResponse) {
-          auto response = protocol::ParseConnectResponse(*message);
-          if (response && response->requestId == pendingRequestId_) {
-            awaitingResponse = false;
-            if (response->accepted) {
-              sessionActive_ = true;
-              lastKeepAlive = now;
+          if (type == protocol::ControlMessageType::ConnectResponse) {
+            auto response = protocol::ParseConnectResponse(*message);
+            if (response && response->requestId == pendingRequestId_) {
+              awaitingResponse = false;
+              if (response->accepted) {
+                sessionActive_ = true;
+                lastKeepAlive = now;
+              }
+              if (responseCallback_) responseCallback_(*response);
             }
-            if (responseCallback_) responseCallback_(*response);
+          } else if (type == protocol::ControlMessageType::KeepAliveAck) {
+            missedKeepAlives = 0;
+          } else if (type == protocol::ControlMessageType::Disconnect) {
+            auto disconnect = protocol::ParseDisconnect(*message);
+            sessionActive_ = false;
+            if (remoteDisconnectCallback_) {
+              remoteDisconnectCallback_(
+                  disconnect ? disconnect->reason
+                             : protocol::DisconnectReason::RemoteShutdown);
+            }
+            running_ = false;
           }
-        } else if (type == protocol::ControlMessageType::KeepAliveAck) {
-          missedKeepAlives = 0;
-        } else if (type == protocol::ControlMessageType::Disconnect) {
-          auto disconnect = protocol::ParseDisconnect(*message);
-          sessionActive_ = false;
-          if (remoteDisconnectCallback_) {
-            remoteDisconnectCallback_(
-                disconnect ? disconnect->reason
-                           : protocol::DisconnectReason::RemoteShutdown);
-          }
-          running_ = false;
         }
+      } catch (const std::exception& e) {
+        if (errorCallback_) {
+          errorCallback_(std::string("Malformed control message: ") + e.what());
+        }
+        break;
       }
     } else {
       const int sslError = SSL_get_error(ssl_, received);

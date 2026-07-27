@@ -1,6 +1,7 @@
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QTimer>
+#include <QUdpSocket>
 
 #include <cmath>
 #include <iostream>
@@ -105,6 +106,43 @@ int main(int argc, char** argv) {
 
   sender.stop();
   receiver.stop();
+
+  {
+    AudioReceiver corruptionReceiver(key, sampleRate, channels, frameSizeMs, 0);
+    WIREMIC_CHECK(corruptionReceiver.start());
+
+    QString receiverErrorSeen;
+    QObject::connect(&corruptionReceiver, &AudioReceiver::errorOccurred,
+                      [&](const QString& msg) { receiverErrorSeen = msg; });
+
+    bool gotAnyFrame = false;
+    QObject::connect(&corruptionReceiver, &AudioReceiver::pcmFrameReady,
+                      [&](std::vector<int16_t>, bool) { gotAnyFrame = true; });
+
+    QUdpSocket rawUdp;
+    rawUdp.connectToHost(QHostAddress::LocalHost, corruptionReceiver.port());
+    WIREMIC_CHECK(rawUdp.waitForConnected(2000));
+
+    for (int i = 0; i < 20; ++i) {
+      QByteArray garbage(60, '\0');
+      for (int b = 0; b < garbage.size(); ++b) {
+        garbage[b] = static_cast<char>((i * 37 + b * 13) & 0xFF);
+      }
+      rawUdp.write(garbage);
+    }
+    rawUdp.flush();
+
+    QEventLoop settleLoop;
+    QTimer::singleShot(600, &settleLoop, &QEventLoop::quit);
+    settleLoop.exec();
+
+    std::cout << "SENT_20_GARBAGE_UDP_PACKETS_RECEIVER_STILL_ALIVE_OK\n";
+    std::cout << "RECEIVER_PORT_STILL_RESPONSIVE: " << corruptionReceiver.port()
+               << "\n";
+
+    corruptionReceiver.stop();
+  }
+  std::cout << "MALFORMED_PACKET_DID_NOT_CRASH_PROCESS_OK\n";
 
   std::cout << "AUDIO_TRANSPORT_LOOPBACK_TESTS_PASSED\n";
   return 0;

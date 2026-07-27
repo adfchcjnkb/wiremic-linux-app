@@ -181,16 +181,20 @@ std::string ToJson(const AnnouncePacket& packet) {
 }
 
 std::optional<AnnouncePacket> ParseAnnounce(const std::string& text) {
-  json node = json::parse(text, nullptr, false);
-  if (node.is_discarded() || node.value("type", "") != "ANNOUNCE") {
+  try {
+    json node = json::parse(text, nullptr, false);
+    if (node.is_discarded() || node.value("type", "") != "ANNOUNCE") {
+      return std::nullopt;
+    }
+    auto device = DeviceFromJson(node);
+    if (!device) return std::nullopt;
+    AnnouncePacket packet;
+    packet.device = *device;
+    packet.protoVersion = node.value("protoVersion", kProtocolVersion);
+    return packet;
+  } catch (const json::exception&) {
     return std::nullopt;
   }
-  auto device = DeviceFromJson(node);
-  if (!device) return std::nullopt;
-  AnnouncePacket packet;
-  packet.device = *device;
-  packet.protoVersion = node.value("protoVersion", kProtocolVersion);
-  return packet;
 }
 
 std::string ToJson(const ConnectRequest& request) {
@@ -210,24 +214,28 @@ std::string ToJson(const ConnectRequest& request) {
 }
 
 std::optional<ConnectRequest> ParseConnectRequest(const std::string& text) {
-  json node = json::parse(text, nullptr, false);
-  if (node.is_discarded() || node.value("type", "") != "CONNECT_REQUEST") {
+  try {
+    json node = json::parse(text, nullptr, false);
+    if (node.is_discarded() || node.value("type", "") != "CONNECT_REQUEST") {
+      return std::nullopt;
+    }
+    auto device = DeviceFromJson(node.value("device", json::object()));
+    if (!device) return std::nullopt;
+    ConnectRequest request;
+    request.requestId = node.value("requestId", "");
+    request.device = *device;
+    request.certFingerprint = node.value("certFingerprint", "");
+    auto capabilities = node.value("audioCapabilities", json::object());
+    request.capabilities.sampleRates =
+        capabilities.value("sampleRates", std::vector<uint32_t>{48000});
+    request.capabilities.codec =
+        ParseCodec(capabilities.value("codec", "opus"));
+    request.capabilities.maxBitrateKbps =
+        capabilities.value("maxBitrateKbps", 128u);
+    return request;
+  } catch (const json::exception&) {
     return std::nullopt;
   }
-  auto device = DeviceFromJson(node.value("device", json::object()));
-  if (!device) return std::nullopt;
-  ConnectRequest request;
-  request.requestId = node.value("requestId", "");
-  request.device = *device;
-  request.certFingerprint = node.value("certFingerprint", "");
-  auto capabilities = node.value("audioCapabilities", json::object());
-  request.capabilities.sampleRates =
-      capabilities.value("sampleRates", std::vector<uint32_t>{48000});
-  request.capabilities.codec =
-      ParseCodec(capabilities.value("codec", "opus"));
-  request.capabilities.maxBitrateKbps =
-      capabilities.value("maxBitrateKbps", 128u);
-  return request;
 }
 
 std::string ToJson(const ConnectResponse& response) {
@@ -253,29 +261,33 @@ std::string ToJson(const ConnectResponse& response) {
 }
 
 std::optional<ConnectResponse> ParseConnectResponse(const std::string& text) {
-  json node = json::parse(text, nullptr, false);
-  if (node.is_discarded() || node.value("type", "") != "CONNECT_RESPONSE") {
+  try {
+    json node = json::parse(text, nullptr, false);
+    if (node.is_discarded() || node.value("type", "") != "CONNECT_RESPONSE") {
+      return std::nullopt;
+    }
+    ConnectResponse response;
+    response.requestId = node.value("requestId", "");
+    response.accepted = node.value("accepted", false);
+    response.reason = ParseRejectReason(node.value("reason", "NONE"));
+    if (node.contains("audioSession")) {
+      const auto& sessionNode = node["audioSession"];
+      AudioSession session;
+      session.udpPort = sessionNode.value("udpPort", uint16_t{0});
+      session.sampleRate = sessionNode.value("sampleRate", 48000u);
+      session.channels =
+          static_cast<uint8_t>(sessionNode.value("channels", 1));
+      session.codec = ParseCodec(sessionNode.value("codec", "opus"));
+      session.bitrateKbps = sessionNode.value("bitrateKbps", 96u);
+      session.frameSizeMs =
+          static_cast<uint8_t>(sessionNode.value("frameSizeMs", 10));
+      session.sessionKey = FromBase64(sessionNode.value("sessionKey", ""));
+      response.session = session;
+    }
+    return response;
+  } catch (const json::exception&) {
     return std::nullopt;
   }
-  ConnectResponse response;
-  response.requestId = node.value("requestId", "");
-  response.accepted = node.value("accepted", false);
-  response.reason = ParseRejectReason(node.value("reason", "NONE"));
-  if (node.contains("audioSession")) {
-    const auto& sessionNode = node["audioSession"];
-    AudioSession session;
-    session.udpPort = sessionNode.value("udpPort", uint16_t{0});
-    session.sampleRate = sessionNode.value("sampleRate", 48000u);
-    session.channels =
-        static_cast<uint8_t>(sessionNode.value("channels", 1));
-    session.codec = ParseCodec(sessionNode.value("codec", "opus"));
-    session.bitrateKbps = sessionNode.value("bitrateKbps", 96u);
-    session.frameSizeMs =
-        static_cast<uint8_t>(sessionNode.value("frameSizeMs", 10));
-    session.sessionKey = FromBase64(sessionNode.value("sessionKey", ""));
-    response.session = session;
-  }
-  return response;
 }
 
 namespace {
@@ -304,15 +316,19 @@ DisconnectReason ParseDisconnectReason(const std::string& value) {
 }  // namespace
 
 ControlMessageType PeekMessageType(const std::string& text) {
-  json node = json::parse(text, nullptr, false);
-  if (node.is_discarded()) return ControlMessageType::Unknown;
-  const auto type = node.value("type", "");
-  if (type == "CONNECT_REQUEST") return ControlMessageType::ConnectRequest;
-  if (type == "CONNECT_RESPONSE") return ControlMessageType::ConnectResponse;
-  if (type == "KEEPALIVE") return ControlMessageType::KeepAlive;
-  if (type == "KEEPALIVE_ACK") return ControlMessageType::KeepAliveAck;
-  if (type == "DISCONNECT") return ControlMessageType::Disconnect;
-  return ControlMessageType::Unknown;
+  try {
+    json node = json::parse(text, nullptr, false);
+    if (node.is_discarded()) return ControlMessageType::Unknown;
+    const auto type = node.value("type", "");
+    if (type == "CONNECT_REQUEST") return ControlMessageType::ConnectRequest;
+    if (type == "CONNECT_RESPONSE") return ControlMessageType::ConnectResponse;
+    if (type == "KEEPALIVE") return ControlMessageType::KeepAlive;
+    if (type == "KEEPALIVE_ACK") return ControlMessageType::KeepAliveAck;
+    if (type == "DISCONNECT") return ControlMessageType::Disconnect;
+    return ControlMessageType::Unknown;
+  } catch (const json::exception&) {
+    return ControlMessageType::Unknown;
+  }
 }
 
 std::string ToJson(const KeepAlive& message) {
@@ -330,33 +346,45 @@ std::string ToJson(const DisconnectMessage& message) {
 }
 
 std::optional<KeepAlive> ParseKeepAlive(const std::string& text) {
-  json node = json::parse(text, nullptr, false);
-  if (node.is_discarded() || node.value("type", "") != "KEEPALIVE") {
+  try {
+    json node = json::parse(text, nullptr, false);
+    if (node.is_discarded() || node.value("type", "") != "KEEPALIVE") {
+      return std::nullopt;
+    }
+    KeepAlive message;
+    message.sequence = node.value("seq", uint64_t{0});
+    return message;
+  } catch (const json::exception&) {
     return std::nullopt;
   }
-  KeepAlive message;
-  message.sequence = node.value("seq", uint64_t{0});
-  return message;
 }
 
 std::optional<KeepAliveAck> ParseKeepAliveAck(const std::string& text) {
-  json node = json::parse(text, nullptr, false);
-  if (node.is_discarded() || node.value("type", "") != "KEEPALIVE_ACK") {
+  try {
+    json node = json::parse(text, nullptr, false);
+    if (node.is_discarded() || node.value("type", "") != "KEEPALIVE_ACK") {
+      return std::nullopt;
+    }
+    KeepAliveAck message;
+    message.sequence = node.value("seq", uint64_t{0});
+    return message;
+  } catch (const json::exception&) {
     return std::nullopt;
   }
-  KeepAliveAck message;
-  message.sequence = node.value("seq", uint64_t{0});
-  return message;
 }
 
 std::optional<DisconnectMessage> ParseDisconnect(const std::string& text) {
-  json node = json::parse(text, nullptr, false);
-  if (node.is_discarded() || node.value("type", "") != "DISCONNECT") {
+  try {
+    json node = json::parse(text, nullptr, false);
+    if (node.is_discarded() || node.value("type", "") != "DISCONNECT") {
+      return std::nullopt;
+    }
+    DisconnectMessage message;
+    message.reason = ParseDisconnectReason(node.value("reason", ""));
+    return message;
+  } catch (const json::exception&) {
     return std::nullopt;
   }
-  DisconnectMessage message;
-  message.reason = ParseDisconnectReason(node.value("reason", ""));
-  return message;
 }
 
 }  // namespace wiremic::protocol

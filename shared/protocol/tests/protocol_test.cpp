@@ -98,6 +98,40 @@ int main() {
   WIREMIC_CHECK(parsedDisc->reason == DisconnectReason::Timeout);
   std::cout << "DISCONNECT_OK: " << discJson << "\n";
 
+  {
+    const std::string malformedType =
+        R"({"type":"CONNECT_REQUEST","requestId":"r1",)"
+        R"("device":{"id":"d1","name":"n","model":"m","platform":"linux",)"
+        R"("ip":"1.2.3.4","connectionType":"wifi","controlPort":"NOT_A_NUMBER"},)"
+        R"("certFingerprint":"sha256:aa","audioCapabilities":{"sampleRates":[48000],)"
+        R"("codec":"opus","maxBitrateKbps":128}})";
+
+    bool threw = false;
+    std::optional<ConnectRequest> parsed;
+    try {
+      parsed = ParseConnectRequest(malformedType);
+    } catch (...) {
+      threw = true;
+    }
+    WIREMIC_CHECK(!threw);
+    std::cout << "MALFORMED_FIELD_TYPE_DOES_NOT_THROW_OK (parsed="
+              << parsed.has_value() << ")\n";
+
+    const std::string malformedAnnounce =
+        R"({"type":"ANNOUNCE","id":"d1","name":"n","model":"m",)"
+        R"("platform":"linux","ip":"1.2.3.4","connectionType":"wifi",)"
+        R"("controlPort":[1,2,3]})";
+    bool announceThrew = false;
+    try {
+      auto announceParsed = ParseAnnounce(malformedAnnounce);
+      (void)announceParsed;
+    } catch (...) {
+      announceThrew = true;
+    }
+    WIREMIC_CHECK(!announceThrew);
+    std::cout << "MALFORMED_ANNOUNCE_FIELD_TYPE_DOES_NOT_THROW_OK\n";
+  }
+
   std::cout << "ALL_TESTS_PASSED\n";
   return 0;
 }
