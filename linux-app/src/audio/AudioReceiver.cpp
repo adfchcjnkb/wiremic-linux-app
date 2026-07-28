@@ -23,24 +23,44 @@ AudioReceiver::AudioReceiver(SessionKey key, uint32_t sampleRate,
 }
 
 bool AudioReceiver::start() {
-  if (!socket_.bind(QHostAddress::AnyIPv4, localPort_)) {
-    emit errorOccurred(
-        QStringLiteral("Failed to bind audio receiver socket: %1")
-            .arg(socket_.errorString()));
-    return false;
-  }
+  constexpr int kMaxBindAttempts = 5;
+  const quint16 requestedPort = localPort_;
+  QString lastError;
 
-  localPort_ = socket_.localPort();
-  if (localPort_ == 0) {
+  for (int attempt = 0; attempt < kMaxBindAttempts; ++attempt) {
+    if (socket_.state() != QAbstractSocket::UnconnectedState) {
+      socket_.close();
+    }
+
+    if (!socket_.bind(QHostAddress::AnyIPv4, requestedPort)) {
+      lastError = socket_.errorString();
+      continue;
+    }
+
+    localPort_ = socket_.localPort();
+    if (localPort_ != 0) {
+      playoutTimer_.start(frameSizeMs_);
+      return true;
+    }
+
+    // Rare but real: the bind() syscall can succeed while the OS
+    // momentarily fails to hand back the assigned ephemeral port (seen with
+    // some VPN/firewall setups and sandboxed environments). Retrying with a
+    // fresh bind almost always clears it, since it is a transient allocation
+    // hiccup rather than a persistent condition.
+    lastError = QStringLiteral(
+        "socket bound but the OS reported no local port");
     socket_.close();
-    emit errorOccurred(QStringLiteral(
-        "Audio receiver socket bound but reported no port; refusing to "
-        "advertise an unusable audio endpoint."));
-    return false;
   }
 
-  playoutTimer_.start(frameSizeMs_);
-  return true;
+  emit errorOccurred(
+      QStringLiteral(
+          "Failed to bind a usable audio receiver socket after %1 "
+          "attempts: %2. This can happen if a VPN, firewall, or sandboxed "
+          "environment is restricting UDP port allocation.")
+          .arg(kMaxBindAttempts)
+          .arg(lastError));
+  return false;
 }
 
 void AudioReceiver::stop() {

@@ -19,6 +19,7 @@ struct AudioCaptureConfig {
   std::string sourceTargetName;
   uint32_t sampleRate{48000};
   uint8_t channels{1};
+  uint8_t frameSizeMs{10};
 };
 
 using AudioCaptureCallback =

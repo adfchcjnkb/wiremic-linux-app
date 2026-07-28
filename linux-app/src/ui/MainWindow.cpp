@@ -140,6 +140,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   connect(connectedPage_, &ConnectedDevicePage::disconnectRequested, &controller_, &AppController::disconnectActive);
   connect(settingsPage_, &SettingsPage::autoConnectChanged, &controller_, &AppController::setAutoConnect);
   connect(settingsPage_, &SettingsPage::rememberTrustedChanged, &controller_, &AppController::setRememberTrustedDevices);
+  connect(settingsPage_, &SettingsPage::latencyModeChanged, &controller_, &AppController::setLatencyModeIndex);
   connect(settingsPage_, &SettingsPage::revokeTrustRequested, &controller_, &AppController::revokeTrust);
   connect(incomingDialog_, &IncomingRequestDialog::accepted_, &controller_, &AppController::acceptPendingRequest);
   connect(incomingDialog_, &IncomingRequestDialog::rejected_, &controller_, &AppController::rejectPendingRequest);
@@ -190,6 +191,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   dashboardPage_->setControlPort(controller_.controlPort());
   settingsPage_->setToggleStates(controller_.autoConnect(),
                                   controller_.rememberTrustedDevices());
+  settingsPage_->setLatencyModeIndex(controller_.latencyModeIndex());
   refreshDevicesUi();
   refreshTrustedUi();
   refreshConnectionUi();

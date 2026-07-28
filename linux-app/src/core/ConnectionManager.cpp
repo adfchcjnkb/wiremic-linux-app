@@ -277,6 +277,7 @@ bool ConnectionManager::startAudioReceive(protocol::AudioSession& session) {
   platform::VirtualMicConfig micConfig;
   micConfig.sampleRate = session.sampleRate;
   micConfig.channels = session.channels;
+  micConfig.frameSizeMs = session.frameSizeMs;
 
   virtualMic_ = platform::CreateVirtualMic(micConfig, audioServerKind_);
   if (!virtualMic_) {
@@ -325,6 +326,7 @@ bool ConnectionManager::startAudioSend(const protocol::AudioSession& session,
   platform::AudioCaptureConfig captureConfig;
   captureConfig.sampleRate = session.sampleRate;
   captureConfig.channels = session.channels;
+  captureConfig.frameSizeMs = session.frameSizeMs;
 
   audioCapture_ = std::make_unique<platform::PipeWireAudioCapture>(
       captureConfig, [this](const int16_t* samples, size_t count) {

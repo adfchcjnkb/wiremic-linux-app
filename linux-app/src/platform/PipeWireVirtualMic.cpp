@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <string>
 
 namespace wiremic::platform {
 
@@ -130,6 +131,11 @@ bool PipeWireVirtualMic::start() {
         return false;
     }
 
+    const uint32_t latencyFrames = std::max<uint32_t>(
+        1, config_.sampleRate * config_.frameSizeMs / 1000);
+    const std::string latencyHint =
+        std::to_string(latencyFrames) + "/" + std::to_string(config_.sampleRate);
+
     struct pw_properties* props = pw_properties_new(
         PW_KEY_MEDIA_TYPE, "Audio",
         PW_KEY_MEDIA_CATEGORY, "Playback",
@@ -137,7 +143,7 @@ bool PipeWireVirtualMic::start() {
         PW_KEY_MEDIA_ROLE, "Communication",
         PW_KEY_NODE_NAME, config_.nodeName.c_str(),
         PW_KEY_NODE_DESCRIPTION, config_.nodeDescription.c_str(),
-        PW_KEY_NODE_LATENCY, "480/48000",
+        PW_KEY_NODE_LATENCY, latencyHint.c_str(),
         nullptr);
 
     static const struct pw_stream_events streamEvents = [] {

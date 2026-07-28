@@ -10,6 +10,7 @@ struct VirtualMicConfig {
   std::string nodeDescription{"Wireless Mic (from Android)"};
   uint32_t sampleRate{48000};
   uint8_t channels{1};
+  uint8_t frameSizeMs{10};
 };
 
 }

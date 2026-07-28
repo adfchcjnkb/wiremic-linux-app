@@ -103,10 +103,15 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     autoConnect_ = stored.value(QStringLiteral("autoConnect"), false).toBool();
     rememberTrustedDevices_ =
         stored.value(QStringLiteral("rememberTrustedDevices"), true).toBool();
+    latencyModeIndex_ =
+        stored.value(QStringLiteral("latencyModeIndex"), 0).toInt();
+    if (latencyModeIndex_ < 0 || latencyModeIndex_ > 2) latencyModeIndex_ = 0;
 
     core::ConnectionManagerSettings settings;
     settings.autoConnect = autoConnect_;
     settings.rememberTrustedDevices = rememberTrustedDevices_;
+    settings.latencyMode =
+        static_cast<protocol::LatencyMode>(latencyModeIndex_);
 
     manager_ = std::make_unique<core::ConnectionManager>(
         localDevice, dataDir, settings, protocol::kDefaultControlPort);
@@ -292,11 +297,24 @@ void AppController::setRememberTrustedDevices(bool value) {
   emit settingsChanged();
 }
 
+int AppController::latencyModeIndex() const { return latencyModeIndex_; }
+
+void AppController::setLatencyModeIndex(int index) {
+  if (index < 0 || index > 2 || latencyModeIndex_ == index) return;
+  latencyModeIndex_ = index;
+  applySettings();
+  emit settingsChanged();
+  appendLog(QStringLiteral(
+      "Audio latency mode changed; takes effect on the next connection"));
+}
+
 void AppController::applySettings() {
   if (manager_) {
     auto settings = manager_->settings();
     settings.autoConnect = autoConnect_;
     settings.rememberTrustedDevices = rememberTrustedDevices_;
+    settings.latencyMode =
+        static_cast<protocol::LatencyMode>(latencyModeIndex_);
     manager_->updateSettings(settings);
   }
 
@@ -304,6 +322,7 @@ void AppController::applySettings() {
   stored.setValue(QStringLiteral("autoConnect"), autoConnect_);
   stored.setValue(QStringLiteral("rememberTrustedDevices"),
                    rememberTrustedDevices_);
+  stored.setValue(QStringLiteral("latencyModeIndex"), latencyModeIndex_);
 }
 
 bool AppController::virtualMicActive() const {

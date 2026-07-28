@@ -31,6 +31,8 @@ class AppController : public QObject {
   void setAutoConnect(bool value);
   [[nodiscard]] bool rememberTrustedDevices() const;
   void setRememberTrustedDevices(bool value);
+  [[nodiscard]] int latencyModeIndex() const;
+  void setLatencyModeIndex(int index);
   [[nodiscard]] QString lastError() const;
   [[nodiscard]] bool virtualMicActive() const;
   [[nodiscard]] QString audioBackendName() const;
@@ -67,6 +69,7 @@ class AppController : public QObject {
   QString lastError_;
   bool autoConnect_{false};
   bool rememberTrustedDevices_{true};
+  int latencyModeIndex_{0};
 };
 
 }

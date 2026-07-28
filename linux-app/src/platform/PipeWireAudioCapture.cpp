@@ -4,6 +4,7 @@
 #include <spa/param/audio/format-utils.h>
 
 #include <algorithm>
+#include <string>
 
 namespace wiremic::platform {
 
@@ -74,10 +75,16 @@ bool PipeWireAudioCapture::start() {
     return false;
   }
 
+  const uint32_t latencyFrames = std::max<uint32_t>(
+      1, config_.sampleRate * config_.frameSizeMs / 1000);
+  const std::string latencyHint =
+      std::to_string(latencyFrames) + "/" + std::to_string(config_.sampleRate);
+
   struct pw_properties* props = pw_properties_new(
       PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Capture",
       PW_KEY_MEDIA_ROLE, "Communication", PW_KEY_NODE_NAME,
-      config_.nodeName.c_str(), nullptr);
+      config_.nodeName.c_str(), PW_KEY_NODE_LATENCY, latencyHint.c_str(),
+      nullptr);
 
   if (!config_.sourceTargetName.empty()) {
     pw_properties_set(props, PW_KEY_TARGET_OBJECT,
