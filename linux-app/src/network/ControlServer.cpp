@@ -298,12 +298,19 @@ void ControlServer::onDisconnected() {
 
   auto it = sessions_.find(socket);
   if (it != sessions_.end()) {
-    if (!it->second.requestId.empty()) {
-      requestToSocket_.erase(it->second.requestId);
-      emit clientDisconnected(QString::fromStdString(it->second.requestId),
+    const std::string requestId = it->second.requestId;
+    sessions_.erase(it);
+    if (!requestId.empty()) {
+      // Only drop the mapping if it still points at this socket. A peer that
+      // reconnects reuses its requestId, and a late disconnect from the old
+      // socket must not unhook the new one.
+      auto mapped = requestToSocket_.find(requestId);
+      if (mapped != requestToSocket_.end() && mapped->second == socket) {
+        requestToSocket_.erase(mapped);
+      }
+      emit clientDisconnected(QString::fromStdString(requestId),
                                protocol::DisconnectReason::RemoteShutdown);
     }
-    sessions_.erase(it);
   }
   socket->deleteLater();
 }

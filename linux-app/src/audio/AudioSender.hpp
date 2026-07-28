@@ -44,6 +44,7 @@ class AudioSender : public QObject {
   uint64_t sequence_{0};
   std::chrono::steady_clock::time_point startTime_;
   bool running_{false};
+  bool encodeErrorReported_{false};
 };
 
 }  // namespace wiremic::audio

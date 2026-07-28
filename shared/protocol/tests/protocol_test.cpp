@@ -36,7 +36,47 @@ int main() {
   WIREMIC_CHECK(parsed2.has_value());
   WIREMIC_CHECK(parsed2->capabilities.sampleRates.size() == 2);
   WIREMIC_CHECK(parsed2->capabilities.sampleRates[0] == 48000);
+  WIREMIC_CHECK(parsed2->audioRole == AudioRole::Sender);
+  WIREMIC_CHECK(!parsed2->offeredSession.has_value());
   std::cout << "CONNECT_REQUEST_OK: " << json2 << "\n";
+
+  // A receiver-role request carries the initiator's own audio endpoint.
+  ConnectRequest receiverRequest = request;
+  receiverRequest.requestId = "req-2";
+  receiverRequest.audioRole = AudioRole::Receiver;
+  AudioSession offered;
+  offered.udpPort = 47712;
+  offered.sampleRate = 48000;
+  offered.channels = 1;
+  offered.frameSizeMs = 10;
+  offered.bitrateKbps = 96;
+  for (size_t i = 0; i < offered.sessionKey.size(); ++i) {
+    offered.sessionKey[i] = static_cast<uint8_t>(i * 5 + 1);
+  }
+  receiverRequest.offeredSession = offered;
+
+  auto json2b = ToJson(receiverRequest);
+  auto parsed2b = ParseConnectRequest(json2b);
+  WIREMIC_CHECK(parsed2b.has_value());
+  WIREMIC_CHECK(parsed2b->audioRole == AudioRole::Receiver);
+  WIREMIC_CHECK(parsed2b->offeredSession.has_value());
+  WIREMIC_CHECK(parsed2b->offeredSession->udpPort == 47712);
+  WIREMIC_CHECK(parsed2b->offeredSession->frameSizeMs == 10);
+  WIREMIC_CHECK(parsed2b->offeredSession->sessionKey == offered.sessionKey);
+  std::cout << "CONNECT_REQUEST_RECEIVER_ROLE_OK: " << json2b << "\n";
+
+  // A request from a peer that predates the field must still parse, and must
+  // default to the old sender behaviour.
+  const std::string legacyRequest =
+      R"({"type":"CONNECT_REQUEST","requestId":"legacy","device":)"
+      R"({"id":"x","name":"n","model":"m","platform":"android","ip":"1.2.3.4",)"
+      R"("connectionType":"wifi","controlPort":47600},"certFingerprint":"sha256:aa",)"
+      R"("audioCapabilities":{"sampleRates":[48000],"codec":"opus","maxBitrateKbps":128}})";
+  auto parsedLegacy = ParseConnectRequest(legacyRequest);
+  WIREMIC_CHECK(parsedLegacy.has_value());
+  WIREMIC_CHECK(parsedLegacy->audioRole == AudioRole::Sender);
+  WIREMIC_CHECK(!parsedLegacy->offeredSession.has_value());
+  std::cout << "CONNECT_REQUEST_LEGACY_COMPAT_OK\n";
 
   ConnectResponse response;
   response.requestId = "req-1";

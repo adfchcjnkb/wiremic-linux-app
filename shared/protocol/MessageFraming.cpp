@@ -23,6 +23,8 @@ void MessageFramer::Feed(const char* data, size_t length) {
   buffer_.append(data, length);
 }
 
+void MessageFramer::Reset() { buffer_.clear(); }
+
 std::optional<std::string> MessageFramer::NextMessage() {
   if (buffer_.size() < 4) return std::nullopt;
 

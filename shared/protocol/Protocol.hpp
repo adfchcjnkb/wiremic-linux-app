@@ -80,11 +80,25 @@ struct AudioSession {
   std::array<uint8_t, kSessionKeyBytes> sessionKey{};
 };
 
+// Which end of the pair produces audio. The initiator declares this so a
+// session can be started from either side while the microphone stays wherever
+// it physically is.
+//   Sender   - the initiator captures and sends to the responder's udpPort
+//              (a phone starting a session; the historical default).
+//   Receiver - the initiator wants to receive, and carries its own endpoint in
+//              `offeredSession`; the responder streams its microphone there
+//              (a desktop starting a session with a phone).
+enum class AudioRole : uint8_t { Sender, Receiver };
+
 struct ConnectRequest {
   std::string requestId;
   DeviceInfo device;
   std::string certFingerprint;
   AudioCapabilities capabilities;
+  uint16_t protoVersion{kProtocolVersion};
+  AudioRole audioRole{AudioRole::Sender};
+  // Only set when audioRole == Receiver: where the responder should send.
+  std::optional<AudioSession> offeredSession;
 };
 
 struct ConnectResponse {
@@ -148,6 +162,8 @@ std::optional<ConnectResponse> ParseConnectResponse(const std::string& json);
 const char* ToString(Platform value);
 const char* ToString(ConnectionType value);
 const char* ToString(RejectReason value);
+const char* ToString(AudioRole value);
+std::optional<AudioRole> ParseAudioRole(const std::string& value);
 std::optional<Platform> ParsePlatform(const std::string& value);
 std::optional<ConnectionType> ParseConnectionType(const std::string& value);
 

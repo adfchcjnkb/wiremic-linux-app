@@ -31,12 +31,19 @@ void PipeWireAudioCapture::OnProcess(void* userdata) {
 
   const uint32_t stride =
       static_cast<uint32_t>(sizeof(int16_t)) * self->config_.channels;
-  const uint32_t chunkSize = spaBuffer->datas[0].chunk->size;
+
+  // PipeWire is free to hand back a chunk that starts partway into the mapped
+  // buffer. Ignoring `offset` reads the wrong samples (and, near the end of the
+  // buffer, past it) — clamp against maxsize before trusting either field.
+  const struct spa_data& data = spaBuffer->datas[0];
+  const uint32_t offset = std::min(data.chunk->offset, data.maxsize);
+  const uint32_t chunkSize =
+      std::min(data.chunk->size, data.maxsize - offset);
   const uint32_t frameCount = stride > 0 ? chunkSize / stride : 0;
 
   if (frameCount > 0 && self->onSamples_) {
-    const auto* src =
-        static_cast<const int16_t*>(spaBuffer->datas[0].data);
+    const auto* src = reinterpret_cast<const int16_t*>(
+        static_cast<const uint8_t*>(data.data) + offset);
     self->onSamples_(src, static_cast<size_t>(frameCount) *
                                self->config_.channels);
   }

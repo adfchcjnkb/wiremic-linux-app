@@ -42,14 +42,23 @@ ConnectionManager::ConnectionManager(protocol::DeviceInfo localDevice,
           this, &ConnectionManager::onIncomingRequest);
   connect(&controlServer_, &network::ControlServer::clientDisconnected, this,
           [this](QString requestId, protocol::DisconnectReason reason) {
+            const auto id = requestId.toStdString();
             if (hasActiveConnection_ &&
-                activeConnection_.activeRequestId == requestId.toStdString()) {
+                activeConnection_.activeRequestId == id) {
               hasActiveConnection_ = false;
               stopAudio();
               setState(protocol::ConnectionState::Idle);
               emit connectionClosed(reason);
             }
-            pendingIncoming_.erase(requestId.toStdString());
+            // A peer that disappears while its request is still awaiting
+            // approval leaves a prompt on screen that can never be answered.
+            if (pendingIncoming_.erase(id) > 0) {
+              if (activeConnection_.activeRequestId == id &&
+                  !hasActiveConnection_) {
+                setState(protocol::ConnectionState::Idle);
+              }
+              emit incomingRequestCancelled(requestId);
+            }
           });
   connect(&controlServer_, &network::ControlServer::errorOccurred, this,
           &ConnectionManager::errorOccurred);
@@ -138,6 +147,15 @@ std::optional<PeerConnectionState> ConnectionManager::activeConnection()
   return activeConnection_;
 }
 
+protocol::ConnectionState ConnectionManager::connectionState() const {
+  return activeConnection_.state;
+}
+
+protocol::DeviceInfo ConnectionManager::peerDevice() const {
+  if (activeConnection_.state == protocol::ConnectionState::Idle) return {};
+  return activeConnection_.device;
+}
+
 std::vector<security::TrustedDevice> ConnectionManager::trustedDevices()
     const {
   return trustedDevices_.All();
@@ -213,30 +231,12 @@ void ConnectionManager::updateSettings(
 bool ConnectionManager::startAudioReceive(protocol::AudioSession& session) {
   stopAudio();
 
-  platform::VirtualMicConfig micConfig;
-  micConfig.sampleRate = session.sampleRate;
-  micConfig.channels = session.channels;
-
-  virtualMic_ = platform::CreateVirtualMic(micConfig, audioServerKind_);
-  if (!virtualMic_) {
-    emit errorOccurred(QStringLiteral(
-        "No PipeWire or PulseAudio server found — cannot create a virtual "
-        "microphone."));
-    return false;
-  }
-  if (!virtualMic_->start()) {
-    virtualMic_.reset();
-    emit errorOccurred(
-        QStringLiteral("Failed to create the virtual microphone via %1.")
-            .arg(audioBackendName()));
-    return false;
-  }
-
   audio::SessionKey key{};
   std::copy(session.sessionKey.begin(), session.sessionKey.end(), key.begin());
 
   // Port 0 asks the OS for a free port; the bound port is read back below and
-  // handed to the peer in the CONNECT_RESPONSE.
+  // handed to the peer in the CONNECT_RESPONSE. This has to succeed — without
+  // a port there is nothing to tell the peer.
   audioReceiver_ = std::make_unique<audio::AudioReceiver>(
       key, session.sampleRate, session.channels, session.frameSizeMs,
       /*localPort=*/0, this);
@@ -252,13 +252,32 @@ bool ConnectionManager::startAudioReceive(protocol::AudioSession& session) {
 
   if (!audioReceiver_->start()) {
     audioReceiver_.reset();
-    virtualMic_->stop();
-    virtualMic_.reset();
     return false;
   }
 
+  // The virtual microphone is best-effort: if no audio server is running we
+  // still complete the pairing and keep the session up, and say so loudly,
+  // rather than rejecting a peer for a locally recoverable problem. Audio is
+  // simply discarded until a mic exists.
+  platform::VirtualMicConfig micConfig;
+  micConfig.sampleRate = session.sampleRate;
+  micConfig.channels = session.channels;
+
+  virtualMic_ = platform::CreateVirtualMic(micConfig, audioServerKind_);
+  if (!virtualMic_) {
+    emit errorOccurred(QStringLiteral(
+        "No PipeWire or PulseAudio server is running — connected, but no "
+        "virtual microphone could be created."));
+  } else if (!virtualMic_->start()) {
+    virtualMic_.reset();
+    emit errorOccurred(
+        QStringLiteral("Connected, but creating the virtual microphone via %1 "
+                       "failed.")
+            .arg(audioBackendName()));
+  }
+
   session.udpPort = audioReceiver_->port();
-  emit audioStateChanged(true, audioBackendName());
+  emit audioStateChanged(virtualMicActive(), audioBackendName());
   return true;
 }
 
@@ -375,6 +394,26 @@ void ConnectionManager::onIncomingRequest(protocol::ConnectRequest request,
     return;
   }
 
+  // A prompt is already on screen for someone else. Answer this one now rather
+  // than silently replacing the visible request with a different device.
+  if (!pendingIncoming_.empty()) {
+    controlServer_.reject(request.requestId,
+                           protocol::RejectReason::AlreadyConnected);
+    return;
+  }
+
+  if (request.protoVersion != protocol::kProtocolVersion) {
+    controlServer_.reject(request.requestId,
+                           protocol::RejectReason::UnsupportedProtocol);
+    emit errorOccurred(
+        QStringLiteral("Rejected %1: it speaks protocol version %2, this "
+                       "build speaks %3.")
+            .arg(QString::fromStdString(request.device.name))
+            .arg(request.protoVersion)
+            .arg(protocol::kProtocolVersion));
+    return;
+  }
+
   const bool trusted = settings_.rememberTrustedDevices &&
                         trustedDevices_.IsTrusted(
                             request.device.id, peerFingerprint.toStdString());
@@ -407,11 +446,15 @@ void ConnectionManager::approveIncoming(const std::string& requestId) {
   auto it = pendingIncoming_.find(requestId);
   if (it == pendingIncoming_.end()) return;
 
-  const auto& [request, peerFingerprint] = it->second;
+  // Copied, not bound by reference: the entry is erased below, and the signals
+  // emitted before that point can re-enter and rehash the map.
+  const protocol::ConnectRequest request = it->second.first;
+  const QString peerFingerprint = it->second.second;
+  pendingIncoming_.erase(it);
+
   auto session = negotiateSession(request.capabilities);
   if (!startAudioReceive(session)) {
     controlServer_.reject(requestId, protocol::RejectReason::UnsupportedCodec);
-    pendingIncoming_.erase(it);
     setState(protocol::ConnectionState::Idle);
     emit connectionFailed(QStringLiteral("AUDIO_UNAVAILABLE"));
     return;
@@ -428,8 +471,6 @@ void ConnectionManager::approveIncoming(const std::string& requestId) {
   hasActiveConnection_ = true;
   setState(protocol::ConnectionState::Streaming);
   emit connectionEstablished(request.device);
-
-  pendingIncoming_.erase(it);
 }
 
 void ConnectionManager::rejectIncoming(const std::string& requestId,
@@ -447,6 +488,15 @@ void ConnectionManager::rejectIncoming(const std::string& requestId,
 }
 
 void ConnectionManager::createControlClient() {
+  // Close the previous attempt's socket before dropping it, so a stale TLS
+  // connection isn't left half-open on the peer while we dial again.
+  if (controlClient_) {
+    controlClient_->disconnect(this);
+    controlClient_->disconnectFromDevice(
+        protocol::DisconnectReason::UserRequested);
+    controlClient_.reset();
+  }
+
   controlClient_ =
       std::make_unique<network::ControlClient>(certificateManager_, this);
   connect(controlClient_.get(), &network::ControlClient::responseReceived,
@@ -520,9 +570,15 @@ void ConnectionManager::onOutgoingResponse(protocol::ConnectResponse response) {
   }
 
   // We are the initiator, so the peer is the receiver: capture locally and
-  // stream to the endpoint it just handed us.
-  if (response.session) {
-    startAudioSend(*response.session, lastRemoteHost_);
+  // stream to the endpoint it just handed us. The control session stays up if
+  // this fails — the peer accepted us — but say so, because a connection that
+  // silently carries no audio looks like the app is broken.
+  if (!response.session) {
+    emit errorOccurred(QStringLiteral(
+        "Peer accepted the connection but offered no audio endpoint."));
+  } else if (!startAudioSend(*response.session, lastRemoteHost_)) {
+    emit errorOccurred(QStringLiteral(
+        "Connected, but the microphone stream could not be started."));
   }
 
   setState(protocol::ConnectionState::Streaming);

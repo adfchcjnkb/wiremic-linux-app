@@ -126,6 +126,19 @@ AppController::AppController(QObject* parent) : QObject(parent) {
           emit incomingRequestPopupRequested();
         });
 
+    connect(manager_.get(),
+            &core::ConnectionManager::incomingRequestCancelled, this,
+            [this](QString requestId) {
+              if (!pendingRequest_ ||
+                  pendingRequest_->requestId != requestId.toStdString()) {
+                return;
+              }
+              appendLog(QStringLiteral(
+                  "Incoming request withdrawn before it was answered"));
+              pendingRequest_.reset();
+              emit pendingRequestChanged();
+            });
+
     connect(manager_.get(), &core::ConnectionManager::connectionStateChanged,
             this, &AppController::connectionStateChanged);
 
@@ -147,6 +160,12 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             [this](QString reason) {
               lastError_ = reason;
               appendLog(QStringLiteral("Connection failed: %1").arg(reason));
+              // The approval prompt is dead once the attempt has failed;
+              // leaving it up offers a button that does nothing.
+              if (pendingRequest_) {
+                pendingRequest_.reset();
+                emit pendingRequestChanged();
+              }
               emit lastErrorChanged();
             });
 
@@ -220,21 +239,23 @@ QVariantList AppController::logMessages() const { return logMessages_; }
 
 QString AppController::connectionState() const {
   if (!manager_) return QStringLiteral("Idle");
-  auto state = manager_->activeConnection();
-  if (!state) return QStringLiteral("Idle");
-  return ConnectionStateToString(state->state);
+  return ConnectionStateToString(manager_->connectionState());
 }
 
 bool AppController::hasActiveConnection() const {
   if (!manager_) return false;
-  return manager_->activeConnection().has_value();
+  // Only a live session counts. A request that has been sent but not yet
+  // answered must not paint the UI as connected.
+  return manager_->connectionState() == protocol::ConnectionState::Streaming;
 }
 
 QVariantMap AppController::activeDevice() const {
   if (!manager_) return {};
-  auto state = manager_->activeConnection();
-  if (!state) return {};
-  return DeviceToVariant(state->device);
+  // The peer of an in-progress handshake is worth showing too, so the UI can
+  // say who it is waiting on instead of going blank.
+  const auto device = manager_->peerDevice();
+  if (device.id.empty()) return {};
+  return DeviceToVariant(device);
 }
 
 QVariantMap AppController::pendingRequest() const {

@@ -50,6 +50,15 @@ ControlClient::ControlClient(security::CertificateManager& certificateManager,
           &ControlClient::onKeepAliveTimer);
 }
 
+ControlClient::~ControlClient() {
+  // Tearing the client down is never a "connection lost" event, and the
+  // socket must not run a slot on a half-destroyed object on its way out.
+  lossReported_ = true;
+  sessionActive_ = false;
+  socket_.disconnect(this);
+  socket_.abort();
+}
+
 void ControlClient::connectToDevice(const QString& host, quint16 port,
                                      protocol::ConnectRequest request) {
   if (!QSslSocket::supportsSsl() ||
@@ -64,6 +73,8 @@ void ControlClient::connectToDevice(const QString& host, quint16 port,
 
   pendingRequest_ = std::move(request);
   sessionActive_ = false;
+  lossReported_ = false;
+  framer_.Reset();
   keepAliveSequence_ = 0;
   lastAckedSequence_ = 0;
   missedKeepAlives_ = 0;
@@ -81,6 +92,7 @@ void ControlClient::disconnectFromDevice(protocol::DisconnectReason reason) {
   keepAliveTimer_.stop();
   timeoutTimer_.stop();
   sessionActive_ = false;
+  lossReported_ = true;
 
   if (socket_.state() == QAbstractSocket::ConnectedState) {
     protocol::DisconnectMessage message;
@@ -143,6 +155,7 @@ void ControlClient::onReadyRead() {
       if (type == protocol::ControlMessageType::Disconnect) {
         auto disconnect = protocol::ParseDisconnect(*message);
         sessionActive_ = false;
+        lossReported_ = true;
         keepAliveTimer_.stop();
         emit remoteDisconnected(disconnect
                                      ? disconnect->reason
@@ -166,6 +179,7 @@ void ControlClient::onKeepAliveTimer() {
   if (missedKeepAlives_ >= protocol::kKeepaliveMissedLimit) {
     keepAliveTimer_.stop();
     sessionActive_ = false;
+    lossReported_ = true;
     emit connectionLost(QString::fromStdString(pendingRequest_.requestId));
     return;
   }
@@ -184,9 +198,20 @@ void ControlClient::onSslErrors(const QList<QSslError>& errors) {
 }
 
 void ControlClient::onDisconnected() {
+  const bool wasStreaming = sessionActive_;
+
   timeoutTimer_.stop();
   keepAliveTimer_.stop();
   sessionActive_ = false;
+
+  // The peer's socket going away is the usual way a connection dies (phone
+  // leaves the network, app killed). Without reporting it the manager stays
+  // "connected" forever: audio keeps running, and every later attempt is
+  // refused with ALREADY_CONNECTED.
+  if (wasStreaming && !lossReported_) {
+    lossReported_ = true;
+    emit connectionLost(QString::fromStdString(pendingRequest_.requestId));
+  }
 }
 
 QString ControlClient::peerFingerprint() const {

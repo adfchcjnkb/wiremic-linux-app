@@ -60,7 +60,12 @@ class ConnectionManager : public QObject {
 
   [[nodiscard]] std::vector<network::DiscoveredDevice> discoveredDevices()
       const;
+  // Set only once a session is actually up. Use connectionState()/peerDevice()
+  // for the transient states (request sent, awaiting approval, reconnecting),
+  // which have a peer but no connection yet.
   [[nodiscard]] std::optional<PeerConnectionState> activeConnection() const;
+  [[nodiscard]] protocol::ConnectionState connectionState() const;
+  [[nodiscard]] protocol::DeviceInfo peerDevice() const;
   [[nodiscard]] std::vector<security::TrustedDevice> trustedDevices() const;
   [[nodiscard]] quint16 controlPort() const;
   void revokeTrust(const std::string& deviceId);
@@ -76,6 +81,9 @@ class ConnectionManager : public QObject {
   void deviceListChanged();
   void incomingRequestPending(protocol::ConnectRequest request,
                                QString peerFingerprint);
+  // The peer withdrew or vanished before the user answered, so any approval
+  // prompt still on screen refers to a request that can no longer be accepted.
+  void incomingRequestCancelled(QString requestId);
   void connectionStateChanged(protocol::ConnectionState state);
   void connectionEstablished(protocol::DeviceInfo peer);
   void connectionClosed(protocol::DisconnectReason reason);

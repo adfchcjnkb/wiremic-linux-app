@@ -1,5 +1,9 @@
 #include "AudioSender.hpp"
 
+#include <QString>
+
+#include <exception>
+
 namespace wiremic::audio {
 
 AudioSender::AudioSender(SessionKey key, uint32_t sampleRate, int channels,
@@ -24,6 +28,7 @@ bool AudioSender::start() {
   }
   sequence_ = 0;
   startTime_ = std::chrono::steady_clock::now();
+  encodeErrorReported_ = false;
   running_ = true;
   return true;
 }
@@ -40,20 +45,34 @@ int AudioSender::frameSamples() const {
 void AudioSender::pushPcmFrame(const int16_t* pcm, int frameSamples) {
   if (!running_) return;
 
-  const auto opusPayload = encoder_->Encode(pcm, frameSamples);
-  if (opusPayload.empty()) return;
+  // Encode and encrypt both throw. This runs from a timer slot, so letting an
+  // exception escape would unwind through the Qt event loop and abort the whole
+  // application over a single bad frame — drop the frame instead.
+  try {
+    const auto opusPayload = encoder_->Encode(pcm, frameSamples);
+    if (opusPayload.empty()) return;
 
-  const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                              std::chrono::steady_clock::now() - startTime_)
-                              .count();
+    const auto elapsedMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - startTime_)
+            .count();
 
-  const auto packet = AudioPacketCodec::Encrypt(
-      key_, sequence_++, static_cast<uint32_t>(elapsedMs), false, false,
-      opusPayload);
+    const auto packet = AudioPacketCodec::Encrypt(
+        key_, sequence_++, static_cast<uint32_t>(elapsedMs), false, false,
+        opusPayload);
 
-  socket_.writeDatagram(reinterpret_cast<const char*>(packet.data()),
-                         static_cast<qint64>(packet.size()), remoteHost_,
-                         remotePort_);
+    socket_.writeDatagram(reinterpret_cast<const char*>(packet.data()),
+                           static_cast<qint64>(packet.size()), remoteHost_,
+                           remotePort_);
+  } catch (const std::exception& e) {
+    // One failure usually means every following frame fails too, so report
+    // only the first rather than flooding the log at one message per frame.
+    if (!encodeErrorReported_) {
+      encodeErrorReported_ = true;
+      emit errorOccurred(
+          QStringLiteral("Dropping outgoing audio frames: %1").arg(e.what()));
+    }
+  }
 }
 
 }  // namespace wiremic::audio
