@@ -2,8 +2,6 @@
 
 #include <QCryptographicHash>
 
-#include <QCryptographicHash>
-
 namespace wiremic::network {
 
 namespace {
@@ -192,10 +190,7 @@ void ControlClient::onDisconnected() {
 }
 
 QString ControlClient::peerFingerprint() const {
-  const auto certificate = socket_.peerCertificate();
-  if (certificate.isNull()) return {};
-  return QStringLiteral("sha256:") +
-         certificate.digest(QCryptographicHash::Sha256).toHex();
+  return peerCertificateFingerprint();
 }
 
 void ControlClient::onTimeout() {

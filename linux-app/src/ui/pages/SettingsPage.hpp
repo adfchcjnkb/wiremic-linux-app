@@ -15,6 +15,8 @@ class SettingsPage : public QWidget {
   explicit SettingsPage(QWidget* parent = nullptr);
 
   void setTrustedDevices(const QStringList& ids, const QStringList& names);
+  // Reflects the persisted settings in the toggles without re-emitting them.
+  void setToggleStates(bool autoConnect, bool rememberTrusted);
 
  signals:
   void autoConnectChanged(bool enabled);

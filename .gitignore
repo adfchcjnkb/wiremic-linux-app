@@ -1,0 +1,19 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+compile_commands.json
+
+# Android / Gradle
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/local.properties
+.cxx/
+
+# Editors / tooling
+.idea/
+.vscode/
+*.swp
+*~
+.cache/

@@ -6,16 +6,22 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
+#include "AudioReceiver.hpp"
+#include "AudioSender.hpp"
 #include "CertificateManager.hpp"
 #include "ControlClient.hpp"
 #include "ControlServer.hpp"
 #include "DiscoveryService.hpp"
+#include "PipeWireAudioCapture.hpp"
 #include "Protocol.hpp"
 #include "TrustedDeviceStore.hpp"
+#include "VirtualMicBackend.hpp"
 
 namespace wiremic::core {
 
@@ -59,6 +65,13 @@ class ConnectionManager : public QObject {
   [[nodiscard]] quint16 controlPort() const;
   void revokeTrust(const std::string& deviceId);
 
+  [[nodiscard]] ConnectionManagerSettings settings() const;
+  void updateSettings(const ConnectionManagerSettings& settings);
+
+  // True while decoded audio is being fed into a system virtual microphone.
+  [[nodiscard]] bool virtualMicActive() const;
+  [[nodiscard]] QString audioBackendName() const;
+
  signals:
   void deviceListChanged();
   void incomingRequestPending(protocol::ConnectRequest request,
@@ -68,6 +81,7 @@ class ConnectionManager : public QObject {
   void connectionClosed(protocol::DisconnectReason reason);
   void connectionFailed(QString reason);
   void errorOccurred(QString message);
+  void audioStateChanged(bool micActive, QString backendName);
 
  private:
   void onDeviceDiscovered(const network::DiscoveredDevice& device);
@@ -87,6 +101,15 @@ class ConnectionManager : public QObject {
   protocol::AudioSession negotiateSession(
       const protocol::AudioCapabilities& remoteCapabilities) const;
 
+  // Receive path: bind the audio socket, open a virtual microphone and write
+  // the bound port back into `session` so the peer knows where to send.
+  bool startAudioReceive(protocol::AudioSession& session);
+  // Send path: capture the local default input and stream it to the peer.
+  bool startAudioSend(const protocol::AudioSession& session,
+                       const QString& remoteHost);
+  void stopAudio();
+  void drainCapturedAudio();
+
   protocol::DeviceInfo localDevice_;
   std::filesystem::path appDataDir_;
   ConnectionManagerSettings settings_;
@@ -105,9 +128,24 @@ class ConnectionManager : public QObject {
   bool hasActiveConnection_{false};
 
   QTimer reconnectTimer_;
+  bool reconnectInFlight_{false};
   std::chrono::steady_clock::time_point reconnectDeadline_;
   QString lastRemoteHost_;
   quint16 lastRemotePort_{0};
+
+  // Audio pipeline. Only one direction is ever live at a time: we receive when
+  // a peer connects to us, and send when we connected out to a peer.
+  std::unique_ptr<audio::AudioReceiver> audioReceiver_;
+  std::unique_ptr<platform::VirtualMicBackend> virtualMic_;
+  std::unique_ptr<audio::AudioSender> audioSender_;
+  std::unique_ptr<platform::PipeWireAudioCapture> audioCapture_;
+  platform::AudioServerKind audioServerKind_{platform::AudioServerKind::None};
+
+  // PipeWire delivers capture buffers on its realtime thread; park them here
+  // and hand them to the (Qt-thread) sender from a timer instead.
+  std::mutex captureMutex_;
+  std::vector<int16_t> capturedSamples_;
+  QTimer captureDrainTimer_;
 };
 
 }  // namespace wiremic::core

@@ -18,14 +18,23 @@ class DashboardPage : public QWidget {
   void setDeviceCount(int count);
   void setControlPort(quint16 port);
   void setLocalDeviceName(const QString& name);
+  void setVirtualMic(bool active, const QString& backendName);
 
  private:
+  void updateDescription();
+
   StatCard* statusCard_;
   StatCard* devicesCard_;
   StatCard* portCard_;
+  StatCard* micCard_;
   MicBadge* micBadge_;
   QLabel* localNameLabel_;
   QLabel* descriptionLabel_;
+
+  bool connected_{false};
+  bool micActive_{false};
+  QString peerName_;
+  QString backendName_{QStringLiteral("none")};
 };
 
 }  // namespace wiremic::ui

@@ -35,16 +35,20 @@ class DiscoveryService : public QObject {
   void onReadyRead();
   void onAnnounceTimer();
   void onSweepTimer();
+  void onRebindTimer();
  private:
+  bool bindSocket();
+  void scheduleRebind();
   void sendAnnounce();
   void handlePacket(const QByteArray& data, const QHostAddress& sender);
   protocol::DeviceInfo localDevice_;
   QUdpSocket socket_;
   QTimer announceTimer_;
   QTimer sweepTimer_;
+  QTimer rebindTimer_;
   std::unordered_map<std::string, DiscoveredDevice> devices_;
+  QString bindError_;
   bool running_{false};
   bool bound_{false};
-  int retryCount_{0};
 };
 }  // namespace wiremic::network

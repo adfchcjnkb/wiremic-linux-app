@@ -142,8 +142,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
       logsPage_->appendLog(last["timestamp"].toString(), last["message"].toString());
     }
   });
+  connect(&controller_, &AppController::audioStateChanged, this, [this]() {
+    if (dashboardPage_) {
+      dashboardPage_->setVirtualMic(controller_.virtualMicActive(),
+                                     controller_.audioBackendName());
+    }
+  });
   dashboardPage_->setLocalDeviceName(controller_.localDeviceName());
   dashboardPage_->setControlPort(controller_.controlPort());
+  settingsPage_->setToggleStates(controller_.autoConnect(),
+                                  controller_.rememberTrustedDevices());
+  // Paint the real state once at startup instead of waiting for the first
+  // signal, so a restart with already-trusted devices isn't shown as empty.
+  refreshDevicesUi();
+  refreshTrustedUi();
+  refreshConnectionUi();
   selectPage(0);
   qDebug() << "MainWindow constructor finished successfully";
 }

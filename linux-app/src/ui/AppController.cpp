@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 #include <QHostInfo>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QSysInfo>
 #include <QUuid>
@@ -98,9 +99,14 @@ AppController::AppController(QObject* parent) : QObject(parent) {
 
     qDebug() << "Local device:" << QString::fromStdString(localDevice.name);
 
+    QSettings stored;
+    autoConnect_ = stored.value(QStringLiteral("autoConnect"), false).toBool();
+    rememberTrustedDevices_ =
+        stored.value(QStringLiteral("rememberTrustedDevices"), true).toBool();
+
     core::ConnectionManagerSettings settings;
-    settings.autoConnect = false;
-    settings.rememberTrustedDevices = true;
+    settings.autoConnect = autoConnect_;
+    settings.rememberTrustedDevices = rememberTrustedDevices_;
 
     manager_ = std::make_unique<core::ConnectionManager>(
         localDevice, dataDir, settings, protocol::kDefaultControlPort);
@@ -147,6 +153,16 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     connect(manager_.get(), &core::ConnectionManager::errorOccurred, this,
             [this](QString message) {
               appendLog(QStringLiteral("Error: %1").arg(message));
+            });
+
+    connect(manager_.get(), &core::ConnectionManager::audioStateChanged, this,
+            [this](bool micActive, QString backend) {
+              appendLog(micActive
+                             ? QStringLiteral(
+                                   "Virtual microphone active via %1")
+                                   .arg(backend)
+                             : QStringLiteral("Virtual microphone stopped"));
+              emit audioStateChanged();
             });
 
     if (!manager_->start()) {
@@ -246,6 +262,7 @@ bool AppController::autoConnect() const { return autoConnect_; }
 void AppController::setAutoConnect(bool value) {
   if (autoConnect_ == value) return;
   autoConnect_ = value;
+  applySettings();
   emit settingsChanged();
 }
 
@@ -256,7 +273,31 @@ bool AppController::rememberTrustedDevices() const {
 void AppController::setRememberTrustedDevices(bool value) {
   if (rememberTrustedDevices_ == value) return;
   rememberTrustedDevices_ = value;
+  applySettings();
   emit settingsChanged();
+}
+
+void AppController::applySettings() {
+  if (manager_) {
+    auto settings = manager_->settings();
+    settings.autoConnect = autoConnect_;
+    settings.rememberTrustedDevices = rememberTrustedDevices_;
+    manager_->updateSettings(settings);
+  }
+
+  QSettings stored;
+  stored.setValue(QStringLiteral("autoConnect"), autoConnect_);
+  stored.setValue(QStringLiteral("rememberTrustedDevices"),
+                   rememberTrustedDevices_);
+}
+
+bool AppController::virtualMicActive() const {
+  return manager_ && manager_->virtualMicActive();
+}
+
+QString AppController::audioBackendName() const {
+  if (!manager_) return QStringLiteral("none");
+  return manager_->audioBackendName();
 }
 
 QString AppController::lastError() const { return lastError_; }

@@ -32,6 +32,8 @@ class AppController : public QObject {
   [[nodiscard]] bool rememberTrustedDevices() const;
   void setRememberTrustedDevices(bool value);
   [[nodiscard]] QString lastError() const;
+  [[nodiscard]] bool virtualMicActive() const;
+  [[nodiscard]] QString audioBackendName() const;
 
  public slots:
   void connectToDevice(const QString& deviceId);
@@ -50,9 +52,11 @@ class AppController : public QObject {
   void settingsChanged();
   void lastErrorChanged();
   void incomingRequestPopupRequested();
+  void audioStateChanged();
 
  private:
   void appendLog(const QString& message);
+  void applySettings();
   static QVariantMap DeviceToVariant(const protocol::DeviceInfo& device,
                                       const QString& status = {});
 

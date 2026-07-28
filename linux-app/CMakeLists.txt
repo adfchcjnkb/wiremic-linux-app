@@ -208,7 +208,7 @@ if(WIREMIC_BUILD_TESTS)
     )
     target_include_directories(wiremic_widget_interaction_test PRIVATE src/ui)
     target_link_libraries(wiremic_widget_interaction_test PRIVATE
-        Qt6::Widgets Qt6::Svg Qt6::Test)
+        Qt6::Widgets Qt6::Svg Qt6::Test wiremic_testing)
     add_test(NAME widget_interaction COMMAND wiremic_widget_interaction_test -platform offscreen)
 
     add_executable(wiremic_icon_distinctness_test
@@ -230,6 +230,46 @@ if(WIREMIC_BUILD_TESTS)
     )
     target_include_directories(wiremic_icon_distinctness_test PRIVATE src/ui)
     target_link_libraries(wiremic_icon_distinctness_test PRIVATE
-        Qt6::Widgets Qt6::Svg Qt6::Test)
+        Qt6::Widgets Qt6::Svg Qt6::Test wiremic_testing)
     add_test(NAME icon_distinctness COMMAND wiremic_icon_distinctness_test -platform offscreen)
+
+    # wiremic_add_test(<ctest name> <source> <libs...>)
+    function(wiremic_add_test test_name source)
+        set(target "wiremic_${test_name}_test")
+        add_executable(${target} ${source})
+        target_link_libraries(${target} PRIVATE wiremic_testing ${ARGN})
+        add_test(NAME ${test_name} COMMAND ${target})
+        # Anything touching a real audio server or the network can hang rather
+        # than fail; bound it so a stuck test cannot wedge the whole run.
+        set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
+    endfunction()
+
+    wiremic_add_test(audio_packet_codec src/audio/tests/audio_packet_codec_test.cpp
+        wiremic_audio)
+    wiremic_add_test(jitter_buffer src/audio/tests/jitter_buffer_test.cpp
+        wiremic_audio)
+    wiremic_add_test(opus_codec src/audio/tests/opus_codec_test.cpp
+        wiremic_audio)
+    wiremic_add_test(audio_transport_loopback
+        src/audio/tests/audio_transport_loopback_test.cpp
+        wiremic_audio Qt6::Core Qt6::Network)
+
+    wiremic_add_test(control_channel_loopback
+        src/network/tests/control_channel_loopback_test.cpp
+        wiremic_network Qt6::Core Qt6::Network)
+    wiremic_add_test(discovery_smoke src/network/tests/discovery_smoke_test.cpp
+        wiremic_network Qt6::Core Qt6::Network)
+
+    wiremic_add_test(connection_manager src/core/tests/connection_manager_test.cpp
+        wiremic_core Qt6::Core Qt6::Network)
+
+    wiremic_add_test(certificate_manager
+        src/core/security/tests/certificate_manager_test.cpp wiremic_security)
+    wiremic_add_test(trusted_device_store
+        src/core/security/tests/trusted_device_store_test.cpp wiremic_security)
+
+    wiremic_add_test(virtual_mic src/platform/tests/virtual_mic_test.cpp
+        wiremic_platform)
+    wiremic_add_test(audio_capture src/platform/tests/audio_capture_test.cpp
+        wiremic_platform)
 endif()

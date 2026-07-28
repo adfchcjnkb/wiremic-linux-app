@@ -143,17 +143,52 @@ bool PulseAudioVirtualMic::start() {
     }
 
     running_ = true;
+    writerRunning_ = true;
+    writerThread_ = std::thread(&PulseAudioVirtualMic::writerLoop, this);
     return true;
 }
 
 void PulseAudioVirtualMic::stop() {
+    // Wake and join the writer before tearing the stream down, so it can never
+    // touch a freed pa_simple handle.
+    writerRunning_ = false;
+    queueSignal_.notify_all();
+    if (writerThread_.joinable()) writerThread_.join();
+
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        queue_.clear();
+    }
+
     if (playbackStream_) {
         pa_simple_free(playbackStream_);
         playbackStream_ = nullptr;
     }
-    
+
     unloadModules();
     running_ = false;
+}
+
+void PulseAudioVirtualMic::writerLoop() {
+    while (true) {
+        std::vector<int16_t> frame;
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            queueSignal_.wait(lock, [this] {
+                return !queue_.empty() || !writerRunning_;
+            });
+            if (!writerRunning_ && queue_.empty()) return;
+            frame = std::move(queue_.front());
+            queue_.pop_front();
+        }
+
+        int error = 0;
+        if (pa_simple_write(playbackStream_, frame.data(),
+                            frame.size() * sizeof(int16_t), &error) < 0) {
+            std::cerr << "Failed to write to PulseAudio: " << pa_strerror(error)
+                      << std::endl;
+        }
+    }
 }
 
 bool PulseAudioVirtualMic::isRunning() const { 
@@ -165,13 +200,17 @@ void PulseAudioVirtualMic::pushSamples(const int16_t* interleaved,
     if (!running_ || !playbackStream_ || interleaved == nullptr || sampleCount == 0) {
         return;
     }
-    
-    int error = 0;
-    const int bytesToWrite = static_cast<int>(sampleCount * sizeof(int16_t));
-    
-    if (pa_simple_write(playbackStream_, interleaved, bytesToWrite, &error) < 0) {
-        std::cerr << "Failed to write to PulseAudio: " << pa_strerror(error) << std::endl;
+
+    // ~1 s of audio. If the sink stalls, drop the oldest frames rather than
+    // growing without bound or blocking the caller.
+    constexpr size_t kMaxQueuedFrames = 100;
+
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        if (queue_.size() >= kMaxQueuedFrames) queue_.pop_front();
+        queue_.emplace_back(interleaved, interleaved + sampleCount);
     }
+    queueSignal_.notify_one();
 }
 
 }  // namespace wiremic::platform

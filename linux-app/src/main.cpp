@@ -60,26 +60,44 @@ bool InitLogFile() {
                           QIODevice::Text);
 }
 
+void CloseLogFile() {
+  if (!g_logFile) return;
+  if (g_logFile->isOpen()) g_logFile->close();
+  delete g_logFile;
+  g_logFile = nullptr;
+}
+
+// A dialog needs a live QApplication; if construction is what failed, fall
+// back to stderr rather than crashing on the way out.
+void ReportFatal(const QString& message) {
+  if (qApp) {
+    QMessageBox::critical(nullptr, "WireMic failed to start", message);
+  } else {
+    fprintf(stderr, "WireMic failed to start: %s\n", qPrintable(message));
+  }
+  qInstallMessageHandler(nullptr);
+  CloseLogFile();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-  // Initialize logging
-  const bool logFileReady = InitLogFile();
-  qInstallMessageHandler(LogMessageHandler);
-
-  if (!logFileReady) {
-    qWarning("Failed to open log file, logging to stderr only");
-  }
-
   try {
-    qInfo("WireMic starting up");
-
-    // Create application
+    // The application identity has to be set before anything asks
+    // QStandardPaths for a location, or the log file, the device identity and
+    // the certificate store all end up in different directories.
     QApplication app(argc, argv);
     app.setOrganizationName("WireMic");
     app.setApplicationName("WireMic");
     app.setApplicationDisplayName("WireMic");
-    
+
+    const bool logFileReady = InitLogFile();
+    qInstallMessageHandler(LogMessageHandler);
+    if (!logFileReady) {
+      qWarning("Failed to open log file, logging to stderr only");
+    }
+    qInfo("WireMic starting up");
+
     // Set icon
     QIcon appIcon(":/WireMic/resources/icons/app_icon.svg");
     if (!appIcon.isNull()) {
@@ -97,12 +115,15 @@ int main(int argc, char** argv) {
     // Process events
     const int result = app.exec();
     qInfo("WireMic exiting normally (code %d)", result);
+
+    // Stop routing messages into a file we are about to close.
+    qInstallMessageHandler(nullptr);
+    CloseLogFile();
     return result;
 
   } catch (const std::exception& e) {
     qCritical("Unhandled exception during startup: %s", e.what());
-    QMessageBox::critical(
-        nullptr, "WireMic failed to start",
+    ReportFatal(
         QString("WireMic could not start due to an internal error:\n\n%1\n\n"
                 "Check the log file for details.")
             .arg(e.what()));
@@ -110,9 +131,8 @@ int main(int argc, char** argv) {
 
   } catch (...) {
     qCritical("Unhandled unknown exception during startup");
-    QMessageBox::critical(nullptr, "WireMic failed to start",
-                           "WireMic could not start due to an unknown "
-                           "internal error. Check the log file for details.");
+    ReportFatal("WireMic could not start due to an unknown internal error. "
+                 "Check the log file for details.");
     return 1;
   }
 }

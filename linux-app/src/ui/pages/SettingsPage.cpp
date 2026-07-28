@@ -96,6 +96,11 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
   rootLayout->addWidget(emptyLabel_);
 }
 
+void SettingsPage::setToggleStates(bool autoConnect, bool rememberTrusted) {
+  autoConnectSwitch_->setChecked(autoConnect, false);
+  rememberTrustedSwitch_->setChecked(rememberTrusted, false);
+}
+
 void SettingsPage::setTrustedDevices(const QStringList& ids,
                                       const QStringList& names) {
   while (trustedListLayout_->count() > 1) {

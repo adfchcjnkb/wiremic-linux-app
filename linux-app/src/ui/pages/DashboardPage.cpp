@@ -22,9 +22,11 @@ DashboardPage::DashboardPage(QWidget* parent) : QWidget(parent) {
   statusCard_ = new StatCard("Status", this);
   devicesCard_ = new StatCard("Devices Found", this);
   portCard_ = new StatCard("Control Port", this);
+  micCard_ = new StatCard("Virtual Mic", this);
   statsLayout->addWidget(statusCard_);
   statsLayout->addWidget(devicesCard_);
   statsLayout->addWidget(portCard_);
+  statsLayout->addWidget(micCard_);
   rootLayout->addLayout(statsLayout);
   auto* mainCard = new GlassPanel(this);
   auto* cardLayout = new QHBoxLayout(mainCard);
@@ -52,11 +54,42 @@ DashboardPage::DashboardPage(QWidget* parent) : QWidget(parent) {
   setConnected(false, QString());
   setDeviceCount(0);
   setControlPort(0);
+  setVirtualMic(false, QStringLiteral("none"));
 }
 void DashboardPage::setConnected(bool connected, const QString& peerName) {
-  if (micBadge_) micBadge_->setActive(connected);
+  connected_ = connected;
+  peerName_ = peerName;
   if (statusCard_) statusCard_->setValue(connected ? "Connected" : "Idle", connected ? theme::kSuccess : theme::kTextPrimary);
-  if (descriptionLabel_) descriptionLabel_->setText(connected ? QString("Receiving audio from %1. A virtual microphone is available to every application on this computer.").arg(peerName) : "Waiting for a device to connect. Open \"Available Devices\" to discover phones or computers on your network.");
+  updateDescription();
+}
+void DashboardPage::setVirtualMic(bool active, const QString& backendName) {
+  micActive_ = active;
+  backendName_ = backendName;
+  // The badge tracks the microphone, not the control channel: it lights up
+  // only once audio is really reaching the system.
+  if (micBadge_) micBadge_->setActive(active);
+  if (micCard_) {
+    micCard_->setValue(active ? backendName : QStringLiteral("Off"),
+                       active ? theme::kSuccess : theme::kTextPrimary);
+  }
+  updateDescription();
+}
+void DashboardPage::updateDescription() {
+  if (!descriptionLabel_) return;
+  if (connected_ && micActive_) {
+    descriptionLabel_->setText(
+        QString("Receiving audio from %1. \"WireMic Virtual Microphone\" is "
+                "now available to every application on this computer via %2.")
+            .arg(peerName_, backendName_));
+  } else if (connected_) {
+    descriptionLabel_->setText(
+        QString("Connected to %1. Streaming this computer's microphone to it.")
+            .arg(peerName_));
+  } else {
+    descriptionLabel_->setText(
+        "Waiting for a device to connect. Open WireMic on your phone and pick "
+        "this computer — the request will show up here for approval.");
+  }
 }
 void DashboardPage::setDeviceCount(int count) {
   if (devicesCard_) devicesCard_->setValue(QString::number(count));

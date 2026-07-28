@@ -21,6 +21,7 @@ class ControlTcpServer : public QTcpServer {
 
  signals:
   void newSslConnection(QSslSocket* socket);
+  void connectionSetupFailed(QString reason);
 
  protected:
   void incomingConnection(qintptr handle) override;

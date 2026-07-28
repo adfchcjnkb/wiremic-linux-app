@@ -7,7 +7,12 @@ namespace wiremic::audio {
 
 namespace {
 constexpr std::chrono::milliseconds kStableGrowthCooldown{500};
-}
+
+// Hard ceiling on buffered frames. A sender that jumps its sequence numbers
+// (or a spoofed packet that survives decryption) must not be able to grow the
+// buffer without bound; ~2 s of 5 ms frames is far more than playout needs.
+constexpr size_t kMaxBufferedFrames = 400;
+}  // namespace
 
 JitterBuffer::JitterBuffer(uint8_t frameSizeMs, int minDepthFrames,
                             int maxDepthFrames, int initialDepthFrames)
@@ -78,6 +83,14 @@ void JitterBuffer::Push(uint64_t sequence, std::vector<uint8_t> payload,
   UpdateJitterEstimate(arrivalTime, sequence);
 
   buffer_[sequence] = Entry{std::move(payload), dtx};
+
+  // Drop the oldest frames if the buffer runs away. They are past due anyway,
+  // so advance the playout point with them rather than replaying stale audio.
+  while (buffer_.size() > kMaxBufferedFrames) {
+    const uint64_t oldest = buffer_.begin()->first;
+    buffer_.erase(buffer_.begin());
+    if (oldest >= nextPlayoutSeq_) nextPlayoutSeq_ = oldest + 1;
+  }
 }
 
 JitterPopOutcome JitterBuffer::Pop() {

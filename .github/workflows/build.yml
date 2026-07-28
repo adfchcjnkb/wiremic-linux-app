@@ -25,10 +25,18 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DWIREMIC_BUILD_TESTS=OFF .
+          cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DWIREMIC_BUILD_TESTS=ON .
 
       - name: Build
-        run: cmake --build build --target wiremic -j"$(nproc)"
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test
+        working-directory: build
+        # Offscreen keeps the widget tests headless; the audio tests detect the
+        # absence of a PipeWire/PulseAudio server and skip their live sections.
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --output-on-failure
 
       - name: Package AppImage
         run: |

@@ -1,8 +1,14 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
-#include <string>
+#include <deque>
 #include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "VirtualMicConfig.hpp"
 
@@ -31,6 +37,7 @@ class PulseAudioVirtualMic {
   void unloadModules();
   bool runPactlCommand(const std::string& cmd, std::string& output);
   int parseModuleId(const std::string& output);
+  void writerLoop();
 
   VirtualMicConfig config_;
   std::string sinkName_;
@@ -40,6 +47,15 @@ class PulseAudioVirtualMic {
 
   pa_simple* playbackStream_{nullptr};
   bool running_{false};
+
+  // pa_simple_write() blocks until the server drains the buffer, so it must
+  // never run on the caller's (GUI) thread. Frames are queued here and written
+  // by a dedicated thread.
+  std::thread writerThread_;
+  std::mutex queueMutex_;
+  std::condition_variable queueSignal_;
+  std::deque<std::vector<int16_t>> queue_;
+  std::atomic<bool> writerRunning_{false};
 };
 
 }  // namespace wiremic::platform
