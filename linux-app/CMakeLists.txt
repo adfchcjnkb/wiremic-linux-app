@@ -189,11 +189,15 @@ if(WIREMIC_BUILD_TESTS)
         src/ui/components/GlassButton.cpp
         src/ui/components/NavRailButton.cpp
         src/ui/components/ToggleSwitch.cpp
+        src/ui/components/DeviceRow.cpp
+        src/ui/pages/DevicesPage.cpp
     )
     qt_add_resources(wiremic_widget_interaction_test "wiremic_icons_test1"
         PREFIX "/WireMic"
         FILES
             resources/icons/icon_dashboard.svg
+            resources/icons/icon_phone.svg
+            resources/icons/icon_desktop.svg
     )
     target_include_directories(wiremic_widget_interaction_test PRIVATE src/ui)
     target_link_libraries(wiremic_widget_interaction_test PRIVATE

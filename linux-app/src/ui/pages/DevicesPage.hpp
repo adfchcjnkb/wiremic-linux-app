@@ -16,6 +16,7 @@ class DevicesPage : public QWidget {
 
   void setDevices(const std::vector<DeviceRowData>& devices);
   void setBusyDeviceId(const QString& deviceId);
+  void setStatusMessage(const QString& message);
 
  signals:
   void connectRequested(QString deviceId);
@@ -25,6 +26,7 @@ class DevicesPage : public QWidget {
   QVBoxLayout* listLayout_;
   QWidget* listContainer_;
   QLabel* emptyLabel_;
+  QLabel* statusLabel_;
   QString busyDeviceId_;
   std::vector<DeviceRow*> rows_;
 };

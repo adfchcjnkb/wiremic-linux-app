@@ -130,8 +130,20 @@ quint16 ConnectionManager::controlPort() const { return controlServer_.port(); }
 
 void ConnectionManager::onDeviceDiscovered(
     const network::DiscoveredDevice& device) {
+  auto it = devices_.find(device.info.id);
+
+  const bool changed =
+      it == devices_.end() || it->second.status != device.status ||
+      it->second.info.name != device.info.name ||
+      it->second.info.model != device.info.model ||
+      it->second.info.ip != device.info.ip ||
+      it->second.info.platform != device.info.platform ||
+      it->second.info.connectionType != device.info.connectionType ||
+      it->second.info.controlPort != device.info.controlPort;
+
   devices_[device.info.id] = device;
-  emit deviceListChanged();
+
+  if (changed) emit deviceListChanged();
 }
 
 void ConnectionManager::onDeviceStatusChanged(const QString& deviceId,

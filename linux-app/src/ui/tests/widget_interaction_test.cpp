@@ -8,6 +8,7 @@
 #include "components/GlassButton.hpp"
 #include "components/NavRailButton.hpp"
 #include "components/ToggleSwitch.hpp"
+#include "pages/DevicesPage.hpp"
 
 using namespace wiremic::ui;
 
@@ -80,6 +81,61 @@ int main(int argc, char** argv) {
                        QPoint(60, 22));
     WIREMIC_CHECK(spy.count() == 0);
     std::cout << "BUSY_BUTTON_IGNORES_CLICK_OK\n";
+  }
+
+  {
+    DevicesPage page;
+    page.resize(720, 420);
+    page.show();
+
+    DeviceRowData phone;
+    phone.id = "device-b";
+    phone.name = "Pixel Phone";
+    phone.model = "Pixel 8";
+    phone.platform = "android";
+    phone.ip = "192.168.1.20";
+    phone.status = "Online";
+
+    page.setDevices({phone});
+
+    auto* row = page.findChild<DeviceRow*>();
+    WIREMIC_CHECK(row != nullptr);
+
+    for (int i = 0; i < 10; ++i) page.setDevices({phone});
+    QApplication::processEvents();
+
+    WIREMIC_CHECK(page.findChild<DeviceRow*>() == row);
+    std::cout << "DEVICE_ROW_IDENTITY_STABLE_OK\n";
+
+    QSignalSpy spy(&page, &DevicesPage::connectRequested);
+    auto* button = row->findChild<GlassButton*>();
+    WIREMIC_CHECK(button != nullptr);
+
+    QTest::mousePress(button, Qt::LeftButton, Qt::NoModifier,
+                       button->rect().center());
+    page.setDevices({phone});
+    QApplication::processEvents();
+    QTest::mouseRelease(button, Qt::LeftButton, Qt::NoModifier,
+                         button->rect().center());
+
+    WIREMIC_CHECK(spy.count() == 1);
+    WIREMIC_CHECK(spy.takeFirst().at(0).toString() ==
+                   QStringLiteral("device-b"));
+    std::cout << "DEVICE_ROW_CLICK_SURVIVES_REFRESH_OK\n";
+
+    DeviceRowData desktop;
+    desktop.id = "device-c";
+    desktop.name = "Linux Desktop";
+    desktop.platform = "linux";
+    desktop.status = "Online";
+    page.setDevices({phone, desktop});
+    QApplication::processEvents();
+    WIREMIC_CHECK(page.findChildren<DeviceRow*>().size() == 2);
+
+    page.setDevices({phone});
+    QApplication::processEvents();
+    WIREMIC_CHECK(page.findChildren<DeviceRow*>().size() == 1);
+    std::cout << "DEVICE_ROW_ADD_REMOVE_OK\n";
   }
 
   std::cout << "WIDGET_INTERACTION_TESTS_PASSED\n";

@@ -38,6 +38,12 @@ DevicesPage::DevicesPage(QWidget* parent) : QWidget(parent) {
 
   rootLayout->addLayout(headerLayout);
 
+  statusLabel_ = new QLabel(this);
+  statusLabel_->setWordWrap(true);
+  statusLabel_->setStyleSheet("color: rgb(255,93,120); font-size: 12px;");
+  statusLabel_->setVisible(false);
+  rootLayout->addWidget(statusLabel_);
+
   auto* scrollArea = new QScrollArea(this);
   scrollArea->setWidgetResizable(true);
   scrollArea->setFrameShape(QFrame::NoFrame);
@@ -62,31 +68,41 @@ DevicesPage::DevicesPage(QWidget* parent) : QWidget(parent) {
 }
 
 void DevicesPage::setDevices(const std::vector<DeviceRowData>& devices) {
-  for (auto* row : rows_) row->deleteLater();
-  rows_.clear();
-
-  while (listLayout_->count() > 1) {
-    QLayoutItem* item = listLayout_->takeAt(0);
-    delete item;
+  while (rows_.size() > devices.size()) {
+    auto* row = rows_.back();
+    rows_.pop_back();
+    listLayout_->removeWidget(row);
+    row->hide();
+    row->setParent(nullptr);
+    row->deleteLater();
   }
 
-  for (const auto& data : devices) {
+  while (rows_.size() < devices.size()) {
     auto* row = new DeviceRow(listContainer_);
-    row->setData(data);
-    row->setBusy(data.id == busyDeviceId_);
     connect(row, &DeviceRow::connectRequested, this,
             &DevicesPage::connectRequested);
-    listLayout_->insertWidget(listLayout_->count() - 1, row);
+    listLayout_->insertWidget(static_cast<int>(rows_.size()), row);
     rows_.push_back(row);
+    row->show();
+  }
+
+  for (size_t i = 0; i < devices.size(); ++i) {
+    rows_[i]->setData(devices[i]);
+    rows_[i]->setBusy(devices[i].id == busyDeviceId_);
   }
 
   emptyLabel_->setVisible(devices.empty());
 }
 
+void DevicesPage::setStatusMessage(const QString& message) {
+  statusLabel_->setText(message);
+  statusLabel_->setVisible(!message.isEmpty());
+}
+
 void DevicesPage::setBusyDeviceId(const QString& deviceId) {
   busyDeviceId_ = deviceId;
   for (auto* row : rows_) {
-    row->setBusy(false);
+    row->setBusy(row->deviceId() == busyDeviceId_);
   }
 }
 

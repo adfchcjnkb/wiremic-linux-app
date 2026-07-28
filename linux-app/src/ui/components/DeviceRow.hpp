@@ -23,6 +23,7 @@ class DeviceRow : public QWidget {
 
   void setData(const DeviceRowData& data);
   void setBusy(bool busy);
+  [[nodiscard]] QString deviceId() const;
 
  signals:
   void connectRequested(QString deviceId);

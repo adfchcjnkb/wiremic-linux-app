@@ -1,4 +1,5 @@
 #include "MainWindow.hpp"
+#include <algorithm>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPainter>
@@ -19,6 +20,32 @@ namespace wiremic::ui {
 namespace {
 const char* kIconPaths[] = {":/WireMic/resources/icons/icon_dashboard.svg", ":/WireMic/resources/icons/icon_devices.svg", ":/WireMic/resources/icons/icon_connected.svg", ":/WireMic/resources/icons/icon_settings.svg", ":/WireMic/resources/icons/icon_logs.svg", ":/WireMic/resources/icons/icon_about.svg"};
 const char* kLabels[] = {"Dashboard", "Available Devices", "Connected Device", "Settings", "Logs", "About"};
+
+QString DescribeFailure(const QString& reason) {
+  if (reason.isEmpty()) return {};
+  if (reason == "TIMEOUT") {
+    return "The device did not answer. Make sure the WireMic app is open on "
+           "it and both devices are on the same network.";
+  }
+  if (reason == "INVITE_FAILED") {
+    return "Could not reach the device over the local network. Check that "
+           "Wi-Fi is connected and the network allows broadcast traffic.";
+  }
+  if (reason == "REJECTED_BY_USER") return "The request was declined.";
+  if (reason == "ALREADY_CONNECTED") {
+    return "That device is already in a session.";
+  }
+  if (reason == "DEVICE_NOT_FOUND") {
+    return "That device is no longer on the network.";
+  }
+  if (reason == "AUDIO_UNAVAILABLE") {
+    return "Could not open the audio device for this session.";
+  }
+  if (reason == "RECONNECT_TIMEOUT") {
+    return "The connection dropped and could not be re-established.";
+  }
+  return reason;
+}
 }
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   qDebug() << "MainWindow constructor called";
@@ -135,6 +162,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
       incomingDialog_->hide();
     }
   });
+  connect(&controller_, &AppController::lastErrorChanged, this, [this]() {
+    if (devicesPage_) {
+      devicesPage_->setStatusMessage(
+          DescribeFailure(controller_.lastError()));
+    }
+  });
+  connect(&controller_, &AppController::connectionStateChanged, this, [this]() {
+    if (devicesPage_ && controller_.connectionState() != "Idle") {
+      devicesPage_->setStatusMessage(QString());
+    }
+  });
   connect(&controller_, &AppController::logMessagesChanged, this, [this]() {
     const auto messages = controller_.logMessages();
     if (!messages.isEmpty()) {
@@ -183,12 +221,24 @@ void MainWindow::refreshDevicesUi() {
     data.status = map["status"].toString();
     rows.push_back(data);
   }
+  std::sort(rows.begin(), rows.end(),
+            [](const DeviceRowData& a, const DeviceRowData& b) {
+              if (a.name != b.name) return a.name < b.name;
+              return a.id < b.id;
+            });
   if (devicesPage_) devicesPage_->setDevices(rows);
   if (dashboardPage_) dashboardPage_->setDeviceCount(static_cast<int>(rows.size()));
 }
 void MainWindow::refreshConnectionUi() {
   const bool connected = controller_.hasActiveConnection();
   const auto active = controller_.activeDevice();
+  const QString state = controller_.connectionState();
+  if (devicesPage_) {
+    const bool pending =
+        state == "RequestSent" || state == "AwaitingApproval";
+    devicesPage_->setBusyDeviceId(pending ? active["id"].toString()
+                                          : QString());
+  }
   if (dashboardPage_) dashboardPage_->setConnected(connected, active["name"].toString());
   if (connectedPage_) connectedPage_->setConnected(connected, active["name"].toString(), active["model"].toString(), controller_.connectionState(), active["ip"].toString(), active["connectionType"].toString(), active["platform"].toString());
   if (auto* statusPanel = findChild<GlassPanel*>("statusPanel")) {

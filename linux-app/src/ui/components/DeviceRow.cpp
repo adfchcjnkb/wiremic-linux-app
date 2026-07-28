@@ -61,6 +61,8 @@ void DeviceRow::setData(const DeviceRowData& data) {
 
 void DeviceRow::setBusy(bool busy) { connectButton_->setBusy(busy); }
 
+QString DeviceRow::deviceId() const { return data_.id; }
+
 void DeviceRow::paintEvent(QPaintEvent* ) {
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
