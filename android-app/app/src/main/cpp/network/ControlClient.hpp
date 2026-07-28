@@ -61,4 +61,4 @@ class ControlClient {
   ErrorCallback errorCallback_;
 };
 
-}  // namespace wiremic::android
+}

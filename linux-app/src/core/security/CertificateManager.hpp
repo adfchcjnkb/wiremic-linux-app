@@ -30,4 +30,4 @@ class CertificateManager {
   Certificate certificate_;
 };
 
-}  // namespace wiremic::security
+}

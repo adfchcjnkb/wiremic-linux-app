@@ -6,10 +6,12 @@
 
 #include <chrono>
 #include <cstring>
+#include <exception>
+#include <vector>
 
 namespace wiremic::android {
 
-AudioSender::AudioSender() : encoder_(48000, 1, 96) {}
+AudioSender::AudioSender() = default;
 
 AudioSender::~AudioSender() { stop(); }
 
@@ -50,10 +52,19 @@ bool AudioSender::start(const protocol::AudioSession& session,
   channels_ = session.channels;
   sequence_ = 0;
   frameSamples_ = static_cast<int>(sampleRate_) * session.frameSizeMs / 1000;
+  pending_.clear();
+  pending_.reserve(static_cast<size_t>(frameSamples_) * channels_ * 4);
+  encodeErrorReported_ = false;
 
-  encoder_.~OpusFrameEncoder();
-  new (&encoder_) audio::OpusFrameEncoder(sampleRate_, channels_,
-                                           static_cast<int>(session.bitrateKbps));
+  try {
+    encoder_ = std::make_unique<audio::OpusFrameEncoder>(
+        sampleRate_, channels_, static_cast<int>(session.bitrateKbps));
+  } catch (const std::exception& e) {
+    if (errorCallback_) {
+      errorCallback_(std::string("failed to create Opus encoder: ") + e.what());
+    }
+    return false;
+  }
 
   if (!openUdpSocket(host, udpPort)) {
     if (errorCallback_) errorCallback_("failed to open audio UDP socket");
@@ -78,6 +89,7 @@ bool AudioSender::start(const protocol::AudioSession& session,
 #if __ANDROID_API__ >= 28
   AAudioStreamBuilder_setInputPreset(builder, AAUDIO_INPUT_PRESET_VOICE_COMMUNICATION);
 #endif
+  AAudioStreamBuilder_setFramesPerDataCallback(builder, frameSamples_);
   AAudioStreamBuilder_setDataCallback(builder, &AudioSender::OnAudioData, this);
   AAudioStreamBuilder_setErrorCallback(builder, &AudioSender::OnStreamError, this);
 
@@ -115,10 +127,11 @@ void AudioSender::stop() {
     close(socketFd_);
     socketFd_ = -1;
   }
+  pending_.clear();
   running_ = false;
 }
 
-aaudio_data_callback_result_t AudioSender::OnAudioData(AAudioStream* /*stream*/,
+aaudio_data_callback_result_t AudioSender::OnAudioData(AAudioStream* ,
                                                          void* userdata,
                                                          void* audioData,
                                                          int32_t numFrames) {
@@ -126,7 +139,7 @@ aaudio_data_callback_result_t AudioSender::OnAudioData(AAudioStream* /*stream*/,
   return self->handleAudioData(static_cast<const int16_t*>(audioData), numFrames);
 }
 
-void AudioSender::OnStreamError(AAudioStream* /*stream*/, void* userdata,
+void AudioSender::OnStreamError(AAudioStream* , void* userdata,
                                  aaudio_result_t error) {
   auto* self = static_cast<AudioSender*>(userdata);
   if (self->errorCallback_) {
@@ -138,46 +151,61 @@ void AudioSender::OnStreamError(AAudioStream* /*stream*/, void* userdata,
 
 aaudio_data_callback_result_t AudioSender::handleAudioData(
     const int16_t* frames, int32_t numFrames) {
-  if (!running_ || socketFd_ < 0) return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  if (!running_ || socketFd_ < 0 || !encoder_) {
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  }
 
   if (frames == nullptr || numFrames <= 0) {
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
   }
 
-  if (numFrames != frameSamples_) {
-    if (errorCallback_) {
-      errorCallback_("AAudio frame count mismatch: expected " + 
-                      std::to_string(frameSamples_) + 
-                      " got " + std::to_string(numFrames));
+  const size_t chunk = static_cast<size_t>(frameSamples_) * channels_;
+  if (chunk == 0) return AAUDIO_CALLBACK_RESULT_CONTINUE;
+
+  pending_.insert(pending_.end(), frames,
+                   frames + static_cast<size_t>(numFrames) * channels_);
+
+  const size_t maxPending = chunk * 32;
+  if (pending_.size() > maxPending) {
+    pending_.erase(pending_.begin(),
+                    pending_.begin() +
+                        static_cast<long>(pending_.size() - maxPending));
+  }
+
+  size_t offset = 0;
+  while (pending_.size() - offset >= chunk) {
+    const int16_t* frame = pending_.data() + offset;
+    offset += chunk;
+
+    try {
+      const auto opusPayload = encoder_->Encode(frame, frameSamples_);
+      if (opusPayload.empty()) continue;
+
+      const auto nowMs = static_cast<uint32_t>(
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now().time_since_epoch())
+              .count());
+
+      const auto packet = audio::AudioPacketCodec::Encrypt(
+          sessionKey_, sequence_++, nowMs, false, false, opusPayload);
+
+      send(socketFd_, packet.data(), packet.size(), 0);
+    } catch (const std::exception& e) {
+      if (!encodeErrorReported_) {
+        encodeErrorReported_ = true;
+        if (errorCallback_) {
+          errorCallback_(std::string("Dropping outgoing audio frames: ") +
+                          e.what());
+        }
+      }
     }
-    return AAUDIO_CALLBACK_RESULT_CONTINUE;
   }
 
-  std::vector<uint8_t> opusPayload;
-  try {
-    opusPayload = encoder_.Encode(frames, numFrames);
-  } catch (const std::exception& e) {
-    if (errorCallback_) {
-      errorCallback_(std::string("Opus encode error: ") + e.what());
-    }
-    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  if (offset > 0) {
+    pending_.erase(pending_.begin(), pending_.begin() + static_cast<long>(offset));
   }
-
-  if (opusPayload.empty()) {
-    return AAUDIO_CALLBACK_RESULT_CONTINUE;
-  }
-
-  const auto nowMs = static_cast<uint32_t>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
-          .count());
-
-  const auto packet = audio::AudioPacketCodec::Encrypt(
-      sessionKey_, sequence_++, nowMs, false, false, opusPayload);
-
-  send(socketFd_, packet.data(), packet.size(), 0);
 
   return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
-}  // namespace wiremic::android
+}

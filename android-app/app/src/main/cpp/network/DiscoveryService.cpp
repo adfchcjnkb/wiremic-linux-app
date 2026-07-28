@@ -23,6 +23,11 @@ void DiscoveryService::setCallback(DeviceListCallback callback) {
   callback_ = std::move(callback);
 }
 
+void DiscoveryService::setInviteCallback(InviteCallback callback) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  inviteCallback_ = std::move(callback);
+}
+
 bool DiscoveryService::start() {
   if (running_) return true;
 
@@ -88,7 +93,24 @@ void DiscoveryService::sendAnnounce(int socketFd) const {
 
 void DiscoveryService::handlePacket(const char* data, size_t length,
                                      const std::string& senderIp) {
-  auto parsed = protocol::ParseAnnounce(std::string(data, length));
+  const std::string text(data, length);
+
+  if (auto invite = protocol::ParseInvite(text)) {
+    if (invite->device.id == localDevice_.id) return;
+    if (invite->targetDeviceId != localDevice_.id) return;
+    if (invite->protoVersion != protocol::kProtocolVersion) return;
+
+    invite->device.ip = senderIp;
+    InviteCallback callback;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      callback = inviteCallback_;
+    }
+    if (callback) callback(*invite);
+    return;
+  }
+
+  auto parsed = protocol::ParseAnnounce(text);
   if (!parsed) return;
   if (parsed->device.id == localDevice_.id) return;
 
@@ -184,4 +206,4 @@ void DiscoveryService::run() {
   }
 }
 
-}  // namespace wiremic::android
+}

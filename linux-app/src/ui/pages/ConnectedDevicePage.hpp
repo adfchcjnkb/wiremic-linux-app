@@ -34,4 +34,4 @@ class ConnectedDevicePage : public QWidget {
   StatCard* connectionCard_;
 };
 
-}  // namespace wiremic::ui
+}

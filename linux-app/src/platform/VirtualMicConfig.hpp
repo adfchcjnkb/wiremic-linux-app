@@ -12,4 +12,4 @@ struct VirtualMicConfig {
   uint8_t channels{1};
 };
 
-} // namespace wiremic::platform
+}

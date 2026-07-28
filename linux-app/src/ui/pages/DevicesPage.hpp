@@ -29,4 +29,4 @@ class DevicesPage : public QWidget {
   std::vector<DeviceRow*> rows_;
 };
 
-}  // namespace wiremic::ui
+}

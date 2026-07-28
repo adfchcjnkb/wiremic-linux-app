@@ -61,7 +61,7 @@ std::string GenerateOrLoadDeviceId(const std::filesystem::path& dataDir) {
   return newId;
 }
 
-}  // namespace
+}
 
 QVariantMap AppController::DeviceToVariant(const protocol::DeviceInfo& device,
                                             const QString& status) {
@@ -81,7 +81,7 @@ QVariantMap AppController::DeviceToVariant(const protocol::DeviceInfo& device,
 
 AppController::AppController(QObject* parent) : QObject(parent) {
   qDebug() << "AppController constructor called";
-  
+
   try {
     const auto dataDir = std::filesystem::path(
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
@@ -160,8 +160,6 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             [this](QString reason) {
               lastError_ = reason;
               appendLog(QStringLiteral("Connection failed: %1").arg(reason));
-              // The approval prompt is dead once the attempt has failed;
-              // leaving it up offers a button that does nothing.
               if (pendingRequest_) {
                 pendingRequest_.reset();
                 emit pendingRequestChanged();
@@ -191,9 +189,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       appendLog(QStringLiteral("WireMic started, listening on port %1")
                     .arg(manager_->controlPort()));
     }
-    
+
     qDebug() << "AppController constructor finished successfully";
-    
+
   } catch (const std::exception& e) {
     qCritical() << "Exception in AppController constructor:" << e.what();
     appendLog(QStringLiteral("Error initializing: %1").arg(e.what()));
@@ -244,15 +242,11 @@ QString AppController::connectionState() const {
 
 bool AppController::hasActiveConnection() const {
   if (!manager_) return false;
-  // Only a live session counts. A request that has been sent but not yet
-  // answered must not paint the UI as connected.
   return manager_->connectionState() == protocol::ConnectionState::Streaming;
 }
 
 QVariantMap AppController::activeDevice() const {
   if (!manager_) return {};
-  // The peer of an in-progress handshake is worth showing too, so the UI can
-  // say who it is waiting on instead of going blank.
   const auto device = manager_->peerDevice();
   if (device.id.empty()) return {};
   return DeviceToVariant(device);
@@ -366,4 +360,4 @@ void AppController::appendLog(const QString& message) {
   emit logMessagesChanged();
 }
 
-}  // namespace wiremic::ui
+}

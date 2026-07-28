@@ -13,6 +13,9 @@ using namespace std::chrono_literals;
 namespace {
 constexpr int kReconnectRetryIntervalMs = 2000;
 constexpr int kCaptureDrainIntervalMs = 5;
+constexpr int kInviteTimeoutMs = 15000;
+constexpr int kInviteRetryCount = 4;
+constexpr int kInviteRetryDelayMs = 400;
 
 const char* AudioServerName(platform::AudioServerKind kind) {
   switch (kind) {
@@ -25,7 +28,7 @@ const char* AudioServerName(platform::AudioServerKind kind) {
   }
   return "none";
 }
-}  // namespace
+}
 
 ConnectionManager::ConnectionManager(protocol::DeviceInfo localDevice,
                                       std::filesystem::path appDataDir,
@@ -50,8 +53,6 @@ ConnectionManager::ConnectionManager(protocol::DeviceInfo localDevice,
               setState(protocol::ConnectionState::Idle);
               emit connectionClosed(reason);
             }
-            // A peer that disappears while its request is still awaiting
-            // approval leaves a prompt on screen that can never be answered.
             if (pendingIncoming_.erase(id) > 0) {
               if (activeConnection_.activeRequestId == id &&
                   !hasActiveConnection_) {
@@ -66,6 +67,11 @@ ConnectionManager::ConnectionManager(protocol::DeviceInfo localDevice,
   reconnectTimer_.setInterval(kReconnectRetryIntervalMs);
   connect(&reconnectTimer_, &QTimer::timeout, this,
           &ConnectionManager::onReconnectTick);
+
+  inviteTimer_.setSingleShot(true);
+  inviteTimer_.setInterval(kInviteTimeoutMs);
+  connect(&inviteTimer_, &QTimer::timeout, this,
+          &ConnectionManager::onInviteTimeout);
 
   captureDrainTimer_.setInterval(kCaptureDrainIntervalMs);
   connect(&captureDrainTimer_, &QTimer::timeout, this,
@@ -93,6 +99,8 @@ bool ConnectionManager::start() {
             devices_.erase(deviceId.toStdString());
             emit deviceListChanged();
           });
+  connect(discovery_.get(), &network::DiscoveryService::inviteReceived, this,
+          &ConnectionManager::onInviteReceived);
   connect(discovery_.get(), &network::DiscoveryService::errorOccurred, this,
           &ConnectionManager::errorOccurred);
 
@@ -103,6 +111,8 @@ bool ConnectionManager::start() {
 }
 
 void ConnectionManager::stop() {
+  inviteTimer_.stop();
+  invitedDeviceId_.clear();
   reconnectTimer_.stop();
   reconnectInFlight_ = false;
   stopAudio();
@@ -234,12 +244,9 @@ bool ConnectionManager::startAudioReceive(protocol::AudioSession& session) {
   audio::SessionKey key{};
   std::copy(session.sessionKey.begin(), session.sessionKey.end(), key.begin());
 
-  // Port 0 asks the OS for a free port; the bound port is read back below and
-  // handed to the peer in the CONNECT_RESPONSE. This has to succeed — without
-  // a port there is nothing to tell the peer.
   audioReceiver_ = std::make_unique<audio::AudioReceiver>(
       key, session.sampleRate, session.channels, session.frameSizeMs,
-      /*localPort=*/0, this);
+      0, this);
 
   connect(audioReceiver_.get(), &audio::AudioReceiver::errorOccurred, this,
           &ConnectionManager::errorOccurred);
@@ -255,10 +262,6 @@ bool ConnectionManager::startAudioReceive(protocol::AudioSession& session) {
     return false;
   }
 
-  // The virtual microphone is best-effort: if no audio server is running we
-  // still complete the pairing and keep the session up, and say so loudly,
-  // rather than rejecting a peer for a locally recoverable problem. Audio is
-  // simply discarded until a mic exists.
   platform::VirtualMicConfig micConfig;
   micConfig.sampleRate = session.sampleRate;
   micConfig.channels = session.channels;
@@ -313,8 +316,6 @@ bool ConnectionManager::startAudioSend(const protocol::AudioSession& session,
 
   audioCapture_ = std::make_unique<platform::PipeWireAudioCapture>(
       captureConfig, [this](const int16_t* samples, size_t count) {
-        // Realtime PipeWire thread: only append under the lock, never touch
-        // Qt objects from here.
         std::lock_guard<std::mutex> lock(captureMutex_);
         capturedSamples_.insert(capturedSamples_.end(), samples,
                                  samples + count);
@@ -394,8 +395,6 @@ void ConnectionManager::onIncomingRequest(protocol::ConnectRequest request,
     return;
   }
 
-  // A prompt is already on screen for someone else. Answer this one now rather
-  // than silently replacing the visible request with a different device.
   if (!pendingIncoming_.empty()) {
     controlServer_.reject(request.requestId,
                            protocol::RejectReason::AlreadyConnected);
@@ -414,18 +413,32 @@ void ConnectionManager::onIncomingRequest(protocol::ConnectRequest request,
     return;
   }
 
+  const bool invited = !invitedDeviceId_.empty() &&
+                        invitedDeviceId_ == request.device.id;
+  if (invited) {
+    invitedDeviceId_.clear();
+    inviteTimer_.stop();
+  }
+
   const bool trusted = settings_.rememberTrustedDevices &&
                         trustedDevices_.IsTrusted(
                             request.device.id, peerFingerprint.toStdString());
 
-  if (trusted && settings_.autoConnect) {
+  if (invited || (trusted && settings_.autoConnect)) {
     auto session = negotiateSession(request.capabilities);
     if (!startAudioReceive(session)) {
       controlServer_.reject(request.requestId,
                              protocol::RejectReason::UnsupportedCodec);
+      setState(protocol::ConnectionState::Idle);
+      emit connectionFailed(QStringLiteral("AUDIO_UNAVAILABLE"));
       return;
     }
     controlServer_.accept(request.requestId, session);
+
+    if (settings_.rememberTrustedDevices) {
+      trustedDevices_.Trust(request.device.id, request.device.name,
+                             peerFingerprint.toStdString());
+    }
 
     activeConnection_.device = request.device;
     activeConnection_.activeRequestId = request.requestId;
@@ -446,8 +459,6 @@ void ConnectionManager::approveIncoming(const std::string& requestId) {
   auto it = pendingIncoming_.find(requestId);
   if (it == pendingIncoming_.end()) return;
 
-  // Copied, not bound by reference: the entry is erased below, and the signals
-  // emitted before that point can re-enter and rehash the map.
   const protocol::ConnectRequest request = it->second.first;
   const QString peerFingerprint = it->second.second;
   pendingIncoming_.erase(it);
@@ -488,8 +499,6 @@ void ConnectionManager::rejectIncoming(const std::string& requestId,
 }
 
 void ConnectionManager::createControlClient() {
-  // Close the previous attempt's socket before dropping it, so a stale TLS
-  // connection isn't left half-open on the peer while we dial again.
   if (controlClient_) {
     controlClient_->disconnect(this);
     controlClient_->disconnectFromDevice(
@@ -523,8 +532,72 @@ void ConnectionManager::requestConnection(const std::string& deviceId) {
     return;
   }
 
-  const auto& device = it->second.info;
+  const auto& discovered = it->second;
 
+  if (discovered.info.controlPort == 0) {
+    if (!inviteDevice(discovered)) {
+      emit connectionFailed(QStringLiteral("INVITE_FAILED"));
+    }
+    return;
+  }
+
+  dialDevice(discovered.info);
+}
+
+bool ConnectionManager::inviteDevice(
+    const network::DiscoveredDevice& device) {
+  if (!discovery_) return false;
+
+  protocol::ConnectInvite invite;
+  invite.inviteId = QUuid::createUuid().toString().toStdString();
+  invite.targetDeviceId = device.info.id;
+  invite.device = localDevice_;
+  invite.protoVersion = protocol::kProtocolVersion;
+
+  if (!discovery_->sendInvite(invite)) return false;
+
+  for (int attempt = 1; attempt < kInviteRetryCount; ++attempt) {
+    QTimer::singleShot(attempt * kInviteRetryDelayMs, this,
+                        [this, invite, targetId = device.info.id]() {
+                          if (discovery_ && invitedDeviceId_ == targetId) {
+                            discovery_->sendInvite(invite);
+                          }
+                        });
+  }
+
+  invitedDeviceId_ = device.info.id;
+  activeConnection_.device = device.info;
+  activeConnection_.activeRequestId.clear();
+  hasActiveConnection_ = false;
+  reconnectInFlight_ = false;
+  inviteTimer_.start();
+  setState(protocol::ConnectionState::RequestSent);
+  return true;
+}
+
+void ConnectionManager::onInviteTimeout() {
+  if (invitedDeviceId_.empty()) return;
+  invitedDeviceId_.clear();
+  if (hasActiveConnection_) return;
+  setState(protocol::ConnectionState::Idle);
+  emit connectionFailed(QStringLiteral("TIMEOUT"));
+}
+
+void ConnectionManager::onInviteReceived(const protocol::ConnectInvite& invite) {
+  if (hasActiveConnection_ || !pendingIncoming_.empty()) return;
+  if (localDevice_.controlPort == 0) return;
+
+  auto it = devices_.find(invite.device.id);
+  protocol::DeviceInfo device =
+      it != devices_.end() ? it->second.info : invite.device;
+  if (device.controlPort == 0) device.controlPort = invite.device.controlPort;
+  if (device.ip.empty()) device.ip = invite.device.ip;
+  if (device.controlPort == 0 || device.ip.empty()) return;
+
+  dialDevice(device);
+}
+
+void ConnectionManager::dialDevice(const protocol::DeviceInfo& device) {
   protocol::ConnectRequest request;
   request.requestId = QUuid::createUuid().toString().toStdString();
   request.device = localDevice_;
@@ -569,10 +642,6 @@ void ConnectionManager::onOutgoingResponse(protocol::ConnectResponse response) {
         controlClient_->peerCertificateFingerprint().toStdString());
   }
 
-  // We are the initiator, so the peer is the receiver: capture locally and
-  // stream to the endpoint it just handed us. The control session stays up if
-  // this fails — the peer accepted us — but say so, because a connection that
-  // silently carries no audio looks like the app is broken.
   if (!response.session) {
     emit errorOccurred(QStringLiteral(
         "Peer accepted the connection but offered no audio endpoint."));
@@ -589,8 +658,6 @@ void ConnectionManager::onOutgoingTimedOut(QString requestId) {
   if (requestId.toStdString() != activeConnection_.activeRequestId) return;
   reconnectInFlight_ = false;
 
-  // A timeout during the reconnect window is just a failed retry; leave the
-  // reconnect timer running until the window itself expires.
   if (reconnectTimer_.isActive()) return;
 
   hasActiveConnection_ = false;
@@ -621,8 +688,6 @@ void ConnectionManager::onReconnectTick() {
     return;
   }
 
-  // Don't stack a fresh TLS handshake on top of one that is still in flight —
-  // the previous attempt gets its full 20 s request timeout to land.
   if (reconnectInFlight_) return;
 
   protocol::ConnectRequest request;
@@ -648,6 +713,8 @@ void ConnectionManager::onRemoteDisconnected(
 }
 
 void ConnectionManager::disconnectActive() {
+  inviteTimer_.stop();
+  invitedDeviceId_.clear();
   reconnectTimer_.stop();
   reconnectInFlight_ = false;
   stopAudio();
@@ -679,4 +746,4 @@ void ConnectionManager::setState(protocol::ConnectionState state) {
   emit connectionStateChanged(state);
 }
 
-}  // namespace wiremic::core
+}

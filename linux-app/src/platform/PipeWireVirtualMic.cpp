@@ -45,9 +45,9 @@ PipeWireVirtualMic::~PipeWireVirtualMic() { stop(); }
 bool PipeWireVirtualMic::isRunning() const { return running_; }
 
 void PipeWireVirtualMic::OnStreamStateChanged(void* userdata,
-                                               pw_stream_state /*old_state*/,
-                                               pw_stream_state /*new_state*/,
-                                               const char* /*error*/) {
+                                               pw_stream_state ,
+                                               pw_stream_state ,
+                                               const char* ) {
     (void)userdata;
 }
 
@@ -131,11 +131,11 @@ bool PipeWireVirtualMic::start() {
     }
 
     struct pw_properties* props = pw_properties_new(
-        PW_KEY_MEDIA_TYPE, "Audio", 
+        PW_KEY_MEDIA_TYPE, "Audio",
         PW_KEY_MEDIA_CATEGORY, "Playback",
-        PW_KEY_MEDIA_CLASS, "Audio/Source", 
+        PW_KEY_MEDIA_CLASS, "Audio/Source",
         PW_KEY_MEDIA_ROLE, "Communication",
-        PW_KEY_NODE_NAME, config_.nodeName.c_str(), 
+        PW_KEY_NODE_NAME, config_.nodeName.c_str(),
         PW_KEY_NODE_DESCRIPTION, config_.nodeDescription.c_str(),
         PW_KEY_NODE_LATENCY, "480/48000",
         nullptr);
@@ -241,4 +241,4 @@ void PipeWireVirtualMic::pushSamples(const int16_t* interleaved,
     pw_thread_loop_unlock(loop_);
 }
 
-}  // namespace wiremic::platform
+}

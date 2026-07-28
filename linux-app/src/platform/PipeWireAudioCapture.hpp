@@ -51,4 +51,4 @@ class PipeWireAudioCapture {
   bool running_{false};
 };
 
-}  // namespace wiremic::platform
+}

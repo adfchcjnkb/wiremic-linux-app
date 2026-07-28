@@ -24,6 +24,7 @@ struct DiscoveredDevice {
 class DiscoveryService {
  public:
   using DeviceListCallback = std::function<void(std::vector<DiscoveredDevice>)>;
+  using InviteCallback = std::function<void(protocol::ConnectInvite)>;
 
   explicit DiscoveryService(protocol::DeviceInfo localDevice);
   ~DiscoveryService();
@@ -31,6 +32,7 @@ class DiscoveryService {
   bool start();
   void stop();
   void setCallback(DeviceListCallback callback);
+  void setInviteCallback(InviteCallback callback);
 
   [[nodiscard]] std::vector<DiscoveredDevice> devices() const;
 
@@ -48,6 +50,7 @@ class DiscoveryService {
   mutable std::mutex mutex_;
   std::unordered_map<std::string, DiscoveredDevice> devices_;
   DeviceListCallback callback_;
+  InviteCallback inviteCallback_;
 };
 
-}  // namespace wiremic::android
+}

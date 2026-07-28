@@ -36,4 +36,4 @@ class MainWindow : public QMainWindow {
   AboutPage* aboutPage_{nullptr};
   IncomingRequestDialog* incomingDialog_{nullptr};
 };
-}  // namespace wiremic::ui
+}

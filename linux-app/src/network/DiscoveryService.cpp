@@ -19,13 +19,11 @@ using namespace std::chrono_literals;
 namespace {
 constexpr int kSweepIntervalMs = 1000;
 constexpr int kRebindIntervalMs = 1000;
-}  // namespace
+}
 
 DiscoveryService::DiscoveryService(protocol::DeviceInfo localDevice,
                                     QObject* parent)
     : QObject(parent), localDevice_(std::move(localDevice)) {
-  // Wired once here rather than in start(), so a stop()/start() cycle cannot
-  // stack duplicate connections and emit every announce N times.
   connect(&socket_, &QUdpSocket::readyRead, this,
           &DiscoveryService::onReadyRead);
   connect(&announceTimer_, &QTimer::timeout, this,
@@ -41,10 +39,6 @@ DiscoveryService::~DiscoveryService() { stop(); }
 bool DiscoveryService::bindSocket() {
   if (socket_.state() != QAbstractSocket::UnconnectedState) socket_.close();
 
-  // Qt's ShareAddress only sets SO_REUSEADDR, which on Linux does not let a
-  // second socket bind an already-bound UDP port. Build the socket by hand so
-  // SO_REUSEPORT can be set too — without it a second WireMic instance (or any
-  // other listener on this port) makes discovery fail outright.
   const int fd =
       ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (fd < 0) {
@@ -153,11 +147,15 @@ void DiscoveryService::sendAnnounce() {
   protocol::AnnouncePacket packet;
   packet.device = localDevice_;
   packet.protoVersion = protocol::kProtocolVersion;
-  const auto bytes = QByteArray::fromStdString(protocol::ToJson(packet));
 
-  // 255.255.255.255 is dropped by some routers/interfaces, so also target the
-  // per-interface broadcast address of every up, non-loopback interface. This
-  // is what makes discovery work on multi-NIC hosts and Wi-Fi hotspots.
+  if (!broadcast(QByteArray::fromStdString(protocol::ToJson(packet)))) {
+    emit errorOccurred(QStringLiteral("Failed to broadcast announce: %1")
+                            .arg(socket_.errorString()));
+    scheduleRebind();
+  }
+}
+
+bool DiscoveryService::broadcast(const QByteArray& bytes) {
   bool sentAny =
       socket_.writeDatagram(bytes, QHostAddress::Broadcast,
                              protocol::kDiscoveryBroadcastPort) >= 0;
@@ -180,12 +178,16 @@ void DiscoveryService::sendAnnounce() {
                  sentAny;
     }
   }
+  return sentAny;
+}
 
-  if (!sentAny) {
-    emit errorOccurred(QStringLiteral("Failed to broadcast announce: %1")
-                            .arg(socket_.errorString()));
+bool DiscoveryService::sendInvite(const protocol::ConnectInvite& invite) {
+  if (!running_) return false;
+  if (!bound_ || socket_.state() != QAbstractSocket::BoundState) {
     scheduleRebind();
+    return false;
   }
+  return broadcast(QByteArray::fromStdString(protocol::ToJson(invite)));
 }
 
 void DiscoveryService::onReadyRead() {
@@ -202,12 +204,28 @@ void DiscoveryService::onReadyRead() {
 void DiscoveryService::handlePacket(const QByteArray& data,
                                      const QHostAddress& sender) {
   if (!running_) return;
-  auto parsed = protocol::ParseAnnounce(data.toStdString());
+  const auto text = data.toStdString();
+
+  if (auto invite = protocol::ParseInvite(text)) {
+    if (invite->device.id == localDevice_.id) return;
+    if (invite->targetDeviceId != localDevice_.id) return;
+    if (invite->protoVersion != protocol::kProtocolVersion) return;
+
+    QHostAddress inviterAddress(sender);
+    if (inviterAddress.protocol() == QAbstractSocket::IPv6Protocol) {
+      bool convertible = false;
+      const quint32 ipv4 = inviterAddress.toIPv4Address(&convertible);
+      if (convertible) inviterAddress = QHostAddress(ipv4);
+    }
+    invite->device.ip = inviterAddress.toString().toStdString();
+    emit inviteReceived(*invite);
+    return;
+  }
+
+  auto parsed = protocol::ParseAnnounce(text);
   if (!parsed) return;
   if (parsed->device.id == localDevice_.id) return;
 
-  // A peer speaking a different protocol version cannot be connected to, so
-  // don't advertise it as an available device.
   if (parsed->protoVersion != protocol::kProtocolVersion) return;
 
   QHostAddress senderAddress(sender);
@@ -275,4 +293,4 @@ void DiscoveryService::onSweepTimer() {
   }
 }
 
-}  // namespace wiremic::network
+}

@@ -12,4 +12,4 @@ class IconLoader {
                          QColor tint = QColor());
 };
 
-}  // namespace wiremic::ui
+}

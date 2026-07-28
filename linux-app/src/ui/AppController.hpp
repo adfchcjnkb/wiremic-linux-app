@@ -69,4 +69,4 @@ class AppController : public QObject {
   bool rememberTrustedDevices_{true};
 };
 
-}  // namespace wiremic::ui
+}

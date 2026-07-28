@@ -47,4 +47,4 @@ class AudioSender : public QObject {
   bool encodeErrorReported_{false};
 };
 
-}  // namespace wiremic::audio
+}

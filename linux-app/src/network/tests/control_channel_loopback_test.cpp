@@ -54,7 +54,7 @@ protocol::ConnectRequest BuildRequest(const std::string& fingerprint) {
   return request;
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
   QCoreApplication app(argc, argv);

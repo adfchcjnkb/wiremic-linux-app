@@ -90,4 +90,4 @@ void DevicesPage::setBusyDeviceId(const QString& deviceId) {
   }
 }
 
-}  // namespace wiremic::ui
+}

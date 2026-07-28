@@ -49,4 +49,4 @@ class AudioReceiver : public QObject {
   int frameSamples_;
 };
 
-}  // namespace wiremic::audio
+}

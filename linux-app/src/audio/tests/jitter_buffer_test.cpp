@@ -13,7 +13,7 @@ std::vector<uint8_t> PayloadFor(uint64_t sequence) {
           static_cast<uint8_t>((sequence >> 8) & 0xFF)};
 }
 
-}  // namespace
+}
 
 int main() {
   const auto base = std::chrono::steady_clock::now();

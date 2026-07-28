@@ -29,7 +29,7 @@ double RmsOf(const std::vector<int16_t>& samples) {
   return std::sqrt(sumSquares / static_cast<double>(samples.size()));
 }
 
-}  // namespace
+}
 
 int main() {
   constexpr uint32_t kSampleRate = 48000;

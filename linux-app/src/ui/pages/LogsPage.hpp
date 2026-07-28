@@ -19,4 +19,4 @@ class LogsPage : public QWidget {
   QScrollArea* scrollArea_;
 };
 
-}  // namespace wiremic::ui
+}

@@ -49,7 +49,7 @@ void AddRow(QGridLayout* grid, int row, const QString& label,
   grid->addWidget(valueWidget, row, 1);
 }
 
-}  // namespace
+}
 
 AboutPage::AboutPage(QWidget* parent) : QWidget(parent) {
   auto* rootLayout = new QVBoxLayout(this);
@@ -102,4 +102,4 @@ AboutPage::AboutPage(QWidget* parent) : QWidget(parent) {
   rootLayout->addWidget(card, 1);
 }
 
-}  // namespace wiremic::ui
+}

@@ -73,4 +73,4 @@ void NavRailButton::paintEvent(QPaintEvent*) {
     QRectF textRect(pillRect.left() + 44, 0, pillRect.width() - 44, height());
     painter.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, label_);
 }
-}  // namespace wiremic::ui
+}

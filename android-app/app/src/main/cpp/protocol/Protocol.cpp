@@ -48,6 +48,22 @@ const char* ToString(RejectReason value) {
   return "NONE";
 }
 
+const char* ToString(AudioRole value) {
+  switch (value) {
+    case AudioRole::Sender:
+      return "sender";
+    case AudioRole::Receiver:
+      return "receiver";
+  }
+  return "sender";
+}
+
+std::optional<AudioRole> ParseAudioRole(const std::string& value) {
+  if (value == "sender") return AudioRole::Sender;
+  if (value == "receiver") return AudioRole::Receiver;
+  return std::nullopt;
+}
+
 std::optional<Platform> ParsePlatform(const std::string& value) {
   if (value == "linux") return Platform::Linux;
   if (value == "android") return Platform::Android;
@@ -168,7 +184,31 @@ std::array<uint8_t, kSessionKeyBytes> FromBase64(const std::string& text) {
   return out;
 }
 
-}  // namespace
+json AudioSessionToJson(const AudioSession& session) {
+  return json{
+      {"udpPort", session.udpPort},
+      {"sampleRate", session.sampleRate},
+      {"channels", session.channels},
+      {"codec", CodecName(session.codec)},
+      {"bitrateKbps", session.bitrateKbps},
+      {"frameSizeMs", session.frameSizeMs},
+      {"sessionKey", ToBase64(session.sessionKey)},
+  };
+}
+
+AudioSession AudioSessionFromJson(const json& node) {
+  AudioSession session;
+  session.udpPort = node.value("udpPort", uint16_t{0});
+  session.sampleRate = node.value("sampleRate", 48000u);
+  session.channels = static_cast<uint8_t>(node.value("channels", 1));
+  session.codec = ParseCodec(node.value("codec", "opus"));
+  session.bitrateKbps = node.value("bitrateKbps", 96u);
+  session.frameSizeMs = static_cast<uint8_t>(node.value("frameSizeMs", 10));
+  session.sessionKey = FromBase64(node.value("sessionKey", ""));
+  return session;
+}
+
+}
 
 std::string ToJson(const AnnouncePacket& packet) {
   json node{
@@ -197,6 +237,38 @@ std::optional<AnnouncePacket> ParseAnnounce(const std::string& text) {
   }
 }
 
+std::string ToJson(const ConnectInvite& invite) {
+  json node{
+      {"type", "CONNECT_INVITE"},
+      {"inviteId", invite.inviteId},
+      {"targetDeviceId", invite.targetDeviceId},
+      {"device", DeviceToJson(invite.device)},
+      {"protoVersion", invite.protoVersion},
+  };
+  return node.dump();
+}
+
+std::optional<ConnectInvite> ParseInvite(const std::string& text) {
+  try {
+    json node = json::parse(text, nullptr, false);
+    if (node.is_discarded() || node.value("type", "") != "CONNECT_INVITE") {
+      return std::nullopt;
+    }
+    auto device = DeviceFromJson(node.value("device", json::object()));
+    if (!device) return std::nullopt;
+
+    ConnectInvite invite;
+    invite.inviteId = node.value("inviteId", "");
+    invite.targetDeviceId = node.value("targetDeviceId", "");
+    invite.device = *device;
+    invite.protoVersion = node.value("protoVersion", kProtocolVersion);
+    if (invite.targetDeviceId.empty()) return std::nullopt;
+    return invite;
+  } catch (const json::exception&) {
+    return std::nullopt;
+  }
+}
+
 std::string ToJson(const ConnectRequest& request) {
   json capabilities{
       {"sampleRates", request.capabilities.sampleRates},
@@ -209,7 +281,12 @@ std::string ToJson(const ConnectRequest& request) {
       {"device", DeviceToJson(request.device)},
       {"certFingerprint", request.certFingerprint},
       {"audioCapabilities", capabilities},
+      {"protoVersion", request.protoVersion},
+      {"audioRole", ToString(request.audioRole)},
   };
+  if (request.offeredSession) {
+    node["audioSession"] = AudioSessionToJson(*request.offeredSession);
+  }
   return node.dump();
 }
 
@@ -232,6 +309,13 @@ std::optional<ConnectRequest> ParseConnectRequest(const std::string& text) {
         ParseCodec(capabilities.value("codec", "opus"));
     request.capabilities.maxBitrateKbps =
         capabilities.value("maxBitrateKbps", 128u);
+    request.protoVersion = node.value("protoVersion", kProtocolVersion);
+    request.audioRole = ParseAudioRole(node.value("audioRole", "sender"))
+                            .value_or(AudioRole::Sender);
+    if (request.audioRole == AudioRole::Receiver &&
+        node.contains("audioSession")) {
+      request.offeredSession = AudioSessionFromJson(node["audioSession"]);
+    }
     return request;
   } catch (const json::exception&) {
     return std::nullopt;
@@ -246,16 +330,7 @@ std::string ToJson(const ConnectResponse& response) {
       {"reason", ToString(response.reason)},
   };
   if (response.session) {
-    const auto& session = *response.session;
-    node["audioSession"] = json{
-        {"udpPort", session.udpPort},
-        {"sampleRate", session.sampleRate},
-        {"channels", session.channels},
-        {"codec", CodecName(session.codec)},
-        {"bitrateKbps", session.bitrateKbps},
-        {"frameSizeMs", session.frameSizeMs},
-        {"sessionKey", ToBase64(session.sessionKey)},
-    };
+    node["audioSession"] = AudioSessionToJson(*response.session);
   }
   return node.dump();
 }
@@ -271,18 +346,7 @@ std::optional<ConnectResponse> ParseConnectResponse(const std::string& text) {
     response.accepted = node.value("accepted", false);
     response.reason = ParseRejectReason(node.value("reason", "NONE"));
     if (node.contains("audioSession")) {
-      const auto& sessionNode = node["audioSession"];
-      AudioSession session;
-      session.udpPort = sessionNode.value("udpPort", uint16_t{0});
-      session.sampleRate = sessionNode.value("sampleRate", 48000u);
-      session.channels =
-          static_cast<uint8_t>(sessionNode.value("channels", 1));
-      session.codec = ParseCodec(sessionNode.value("codec", "opus"));
-      session.bitrateKbps = sessionNode.value("bitrateKbps", 96u);
-      session.frameSizeMs =
-          static_cast<uint8_t>(sessionNode.value("frameSizeMs", 10));
-      session.sessionKey = FromBase64(sessionNode.value("sessionKey", ""));
-      response.session = session;
+      response.session = AudioSessionFromJson(node["audioSession"]);
     }
     return response;
   } catch (const json::exception&) {
@@ -313,7 +377,7 @@ DisconnectReason ParseDisconnectReason(const std::string& value) {
   return DisconnectReason::UserRequested;
 }
 
-}  // namespace
+}
 
 ControlMessageType PeekMessageType(const std::string& text) {
   try {
@@ -387,4 +451,4 @@ std::optional<DisconnectMessage> ParseDisconnect(const std::string& text) {
   }
 }
 
-}  // namespace wiremic::protocol
+}

@@ -16,8 +16,8 @@ PulseAudioVirtualMic::PulseAudioVirtualMic(const VirtualMicConfig& config)
       sinkName_("wiremic_null_sink"),
       sourceName_("wiremic_virtual_mic") {}
 
-PulseAudioVirtualMic::~PulseAudioVirtualMic() { 
-    stop(); 
+PulseAudioVirtualMic::~PulseAudioVirtualMic() {
+    stop();
 }
 
 bool PulseAudioVirtualMic::IsPulseAudioAvailable() {
@@ -35,16 +35,16 @@ bool PulseAudioVirtualMic::IsPulseAudioAvailable() {
 bool PulseAudioVirtualMic::runPactlCommand(const std::string& cmd, std::string& output) {
     std::array<char, 256> buffer{};
     std::string result;
-    
+
     std::unique_ptr<FILE, int(*)(FILE*)> pipe(popen(cmd.c_str(), "r"), pclose);
     if (!pipe) {
         return false;
     }
-    
+
     while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get())) {
         result += buffer.data();
     }
-    
+
     output = result;
     return !result.empty();
 }
@@ -58,16 +58,16 @@ int PulseAudioVirtualMic::parseModuleId(const std::string& output) {
 
 bool PulseAudioVirtualMic::loadModules() {
     std::string output;
-    
+
     std::ostringstream cmd1;
     cmd1 << "pactl load-module module-null-sink sink_name=" << sinkName_
          << " sink_properties=device.description=WireMic_Virtual_Sink 2>/dev/null";
-    
+
     if (!runPactlCommand(cmd1.str(), output)) {
         std::cerr << "Failed to run pactl for null sink" << std::endl;
         return false;
     }
-    
+
     nullSinkModuleId_ = parseModuleId(output);
     if (nullSinkModuleId_ < 0) {
         std::cerr << "Failed to parse null sink module ID: " << output << std::endl;
@@ -78,13 +78,13 @@ bool PulseAudioVirtualMic::loadModules() {
     cmd2 << "pactl load-module module-remap-source master=" << sinkName_
          << ".monitor source_name=" << sourceName_
          << " source_properties=device.description=WireMic_Virtual_Microphone 2>/dev/null";
-    
+
     if (!runPactlCommand(cmd2.str(), output)) {
         std::cerr << "Failed to run pactl for remap source" << std::endl;
         unloadModules();
         return false;
     }
-    
+
     remapSourceModuleId_ = parseModuleId(output);
     if (remapSourceModuleId_ < 0) {
         std::cerr << "Failed to parse remap source module ID: " << output << std::endl;
@@ -97,14 +97,14 @@ bool PulseAudioVirtualMic::loadModules() {
 
 void PulseAudioVirtualMic::unloadModules() {
     std::string output;
-    
+
     if (remapSourceModuleId_ >= 0) {
         std::ostringstream cmd;
         cmd << "pactl unload-module " << remapSourceModuleId_ << " 2>/dev/null";
         runPactlCommand(cmd.str(), output);
         remapSourceModuleId_ = -1;
     }
-    
+
     if (nullSinkModuleId_ >= 0) {
         std::ostringstream cmd;
         cmd << "pactl unload-module " << nullSinkModuleId_ << " 2>/dev/null";
@@ -115,7 +115,7 @@ void PulseAudioVirtualMic::unloadModules() {
 
 bool PulseAudioVirtualMic::start() {
     if (running_) return true;
-    
+
     if (!loadModules()) {
         return false;
     }
@@ -126,14 +126,14 @@ bool PulseAudioVirtualMic::start() {
     spec.channels = config_.channels;
 
     int error = 0;
-    playbackStream_ = pa_simple_new(nullptr, 
-                                    config_.nodeName.c_str(), 
+    playbackStream_ = pa_simple_new(nullptr,
+                                    config_.nodeName.c_str(),
                                     PA_STREAM_PLAYBACK,
-                                    sinkName_.c_str(), 
-                                    "WireMic audio feed", 
-                                    &spec, 
-                                    nullptr, 
-                                    nullptr, 
+                                    sinkName_.c_str(),
+                                    "WireMic audio feed",
+                                    &spec,
+                                    nullptr,
+                                    nullptr,
                                     &error);
 
     if (!playbackStream_) {
@@ -149,8 +149,6 @@ bool PulseAudioVirtualMic::start() {
 }
 
 void PulseAudioVirtualMic::stop() {
-    // Wake and join the writer before tearing the stream down, so it can never
-    // touch a freed pa_simple handle.
     writerRunning_ = false;
     queueSignal_.notify_all();
     if (writerThread_.joinable()) writerThread_.join();
@@ -191,8 +189,8 @@ void PulseAudioVirtualMic::writerLoop() {
     }
 }
 
-bool PulseAudioVirtualMic::isRunning() const { 
-    return running_; 
+bool PulseAudioVirtualMic::isRunning() const {
+    return running_;
 }
 
 void PulseAudioVirtualMic::pushSamples(const int16_t* interleaved,
@@ -201,8 +199,6 @@ void PulseAudioVirtualMic::pushSamples(const int16_t* interleaved,
         return;
     }
 
-    // ~1 s of audio. If the sink stalls, drop the oldest frames rather than
-    // growing without bound or blocking the caller.
     constexpr size_t kMaxQueuedFrames = 100;
 
     {
@@ -213,4 +209,4 @@ void PulseAudioVirtualMic::pushSamples(const int16_t* interleaved,
     queueSignal_.notify_one();
 }
 
-}  // namespace wiremic::platform
+}

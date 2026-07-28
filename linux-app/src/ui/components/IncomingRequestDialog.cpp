@@ -109,7 +109,7 @@ void IncomingRequestDialog::setData(const IncomingRequestData& data) {
   iconLabel_->setPixmap(badge);
 }
 
-void IncomingRequestDialog::paintEvent(QPaintEvent* /*event*/) {
+void IncomingRequestDialog::paintEvent(QPaintEvent* ) {
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
 
@@ -122,4 +122,4 @@ void IncomingRequestDialog::paintEvent(QPaintEvent* /*event*/) {
   painter.drawPath(path);
 }
 
-}  // namespace wiremic::ui
+}

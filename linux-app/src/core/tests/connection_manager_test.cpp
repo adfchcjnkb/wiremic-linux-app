@@ -40,7 +40,7 @@ protocol::DeviceInfo MakeDevice(const std::string& id, const std::string& name,
   return device;
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
   QCoreApplication app(argc, argv);

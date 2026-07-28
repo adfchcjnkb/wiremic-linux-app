@@ -107,4 +107,4 @@ JitterPopOutcome JitterBuffer::Pop() {
   return {JitterPopResult::Ready, std::move(entry.payload)};
 }
 
-}  // namespace wiremic::audio
+}

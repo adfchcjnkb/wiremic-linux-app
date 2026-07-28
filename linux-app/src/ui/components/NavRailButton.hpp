@@ -37,4 +37,4 @@ class NavRailButton : public QWidget {
   qreal selectedProgress_{0.0};
 };
 
-}  // namespace wiremic::ui
+}

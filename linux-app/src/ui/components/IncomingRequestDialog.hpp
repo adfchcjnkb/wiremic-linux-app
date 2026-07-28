@@ -38,4 +38,4 @@ class IncomingRequestDialog : public QDialog {
   QLabel* iconLabel_;
 };
 
-}  // namespace wiremic::ui
+}

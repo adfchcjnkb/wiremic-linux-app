@@ -67,8 +67,6 @@ void CloseLogFile() {
   g_logFile = nullptr;
 }
 
-// A dialog needs a live QApplication; if construction is what failed, fall
-// back to stderr rather than crashing on the way out.
 void ReportFatal(const QString& message) {
   if (qApp) {
     QMessageBox::critical(nullptr, "WireMic failed to start", message);
@@ -79,13 +77,10 @@ void ReportFatal(const QString& message) {
   CloseLogFile();
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
   try {
-    // The application identity has to be set before anything asks
-    // QStandardPaths for a location, or the log file, the device identity and
-    // the certificate store all end up in different directories.
     QApplication app(argc, argv);
     app.setOrganizationName("WireMic");
     app.setApplicationName("WireMic");
@@ -98,25 +93,21 @@ int main(int argc, char** argv) {
     }
     qInfo("WireMic starting up");
 
-    // Set icon
     QIcon appIcon(":/WireMic/resources/icons/app_icon.svg");
     if (!appIcon.isNull()) {
       app.setWindowIcon(appIcon);
     } else {
       qWarning("Failed to load app icon");
     }
-    
+
     app.setStyle("Fusion");
 
-    // Create and show main window
     wiremic::ui::MainWindow window;
     window.show();
 
-    // Process events
     const int result = app.exec();
     qInfo("WireMic exiting normally (code %d)", result);
 
-    // Stop routing messages into a file we are about to close.
     qInstallMessageHandler(nullptr);
     CloseLogFile();
     return result;

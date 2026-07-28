@@ -44,7 +44,7 @@ uint32_t ReadU32(const uint8_t* in) {
          (static_cast<uint32_t>(in[2]) << 8) | static_cast<uint32_t>(in[3]);
 }
 
-}  // namespace
+}
 
 std::vector<uint8_t> AudioPacketCodec::Encrypt(
     const SessionKey& key, uint64_t sequence, uint32_t captureTimestampMs,
@@ -174,4 +174,4 @@ std::optional<DecryptedAudioPacket> AudioPacketCodec::Decrypt(
   return result;
 }
 
-}  // namespace wiremic::audio
+}

@@ -44,4 +44,4 @@ QPixmap IconLoader::Render(const QString& resourcePath, int size,
   return pixmap;
 }
 
-}  // namespace wiremic::ui
+}

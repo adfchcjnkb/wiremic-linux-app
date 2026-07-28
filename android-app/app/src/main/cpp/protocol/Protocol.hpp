@@ -80,11 +80,16 @@ struct AudioSession {
   std::array<uint8_t, kSessionKeyBytes> sessionKey{};
 };
 
+enum class AudioRole : uint8_t { Sender, Receiver };
+
 struct ConnectRequest {
   std::string requestId;
   DeviceInfo device;
   std::string certFingerprint;
   AudioCapabilities capabilities;
+  uint16_t protoVersion{kProtocolVersion};
+  AudioRole audioRole{AudioRole::Sender};
+  std::optional<AudioSession> offeredSession;
 };
 
 struct ConnectResponse {
@@ -139,6 +144,16 @@ struct AnnouncePacket {
 std::string ToJson(const AnnouncePacket& packet);
 std::optional<AnnouncePacket> ParseAnnounce(const std::string& json);
 
+struct ConnectInvite {
+  std::string inviteId;
+  std::string targetDeviceId;
+  DeviceInfo device;
+  uint16_t protoVersion{kProtocolVersion};
+};
+
+std::string ToJson(const ConnectInvite& invite);
+std::optional<ConnectInvite> ParseInvite(const std::string& json);
+
 std::string ToJson(const ConnectRequest& request);
 std::optional<ConnectRequest> ParseConnectRequest(const std::string& json);
 
@@ -148,7 +163,9 @@ std::optional<ConnectResponse> ParseConnectResponse(const std::string& json);
 const char* ToString(Platform value);
 const char* ToString(ConnectionType value);
 const char* ToString(RejectReason value);
+const char* ToString(AudioRole value);
+std::optional<AudioRole> ParseAudioRole(const std::string& value);
 std::optional<Platform> ParsePlatform(const std::string& value);
 std::optional<ConnectionType> ParseConnectionType(const std::string& value);
 
-}  // namespace wiremic::protocol
+}

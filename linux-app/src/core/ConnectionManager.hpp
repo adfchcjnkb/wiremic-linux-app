@@ -60,9 +60,6 @@ class ConnectionManager : public QObject {
 
   [[nodiscard]] std::vector<network::DiscoveredDevice> discoveredDevices()
       const;
-  // Set only once a session is actually up. Use connectionState()/peerDevice()
-  // for the transient states (request sent, awaiting approval, reconnecting),
-  // which have a peer but no connection yet.
   [[nodiscard]] std::optional<PeerConnectionState> activeConnection() const;
   [[nodiscard]] protocol::ConnectionState connectionState() const;
   [[nodiscard]] protocol::DeviceInfo peerDevice() const;
@@ -73,7 +70,6 @@ class ConnectionManager : public QObject {
   [[nodiscard]] ConnectionManagerSettings settings() const;
   void updateSettings(const ConnectionManagerSettings& settings);
 
-  // True while decoded audio is being fed into a system virtual microphone.
   [[nodiscard]] bool virtualMicActive() const;
   [[nodiscard]] QString audioBackendName() const;
 
@@ -81,8 +77,6 @@ class ConnectionManager : public QObject {
   void deviceListChanged();
   void incomingRequestPending(protocol::ConnectRequest request,
                                QString peerFingerprint);
-  // The peer withdrew or vanished before the user answered, so any approval
-  // prompt still on screen refers to a request that can no longer be accepted.
   void incomingRequestCancelled(QString requestId);
   void connectionStateChanged(protocol::ConnectionState state);
   void connectionEstablished(protocol::DeviceInfo peer);
@@ -102,17 +96,18 @@ class ConnectionManager : public QObject {
   void onConnectionLost(QString requestId);
   void onRemoteDisconnected(protocol::DisconnectReason reason);
   void onReconnectTick();
+  void onInviteReceived(const protocol::ConnectInvite& invite);
+  void onInviteTimeout();
   void createControlClient();
+  bool inviteDevice(const network::DiscoveredDevice& device);
+  void dialDevice(const protocol::DeviceInfo& device);
 
   void setState(protocol::ConnectionState state);
   protocol::AudioCapabilities localCapabilities() const;
   protocol::AudioSession negotiateSession(
       const protocol::AudioCapabilities& remoteCapabilities) const;
 
-  // Receive path: bind the audio socket, open a virtual microphone and write
-  // the bound port back into `session` so the peer knows where to send.
   bool startAudioReceive(protocol::AudioSession& session);
-  // Send path: capture the local default input and stream it to the peer.
   bool startAudioSend(const protocol::AudioSession& session,
                        const QString& remoteHost);
   void stopAudio();
@@ -135,25 +130,24 @@ class ConnectionManager : public QObject {
   PeerConnectionState activeConnection_;
   bool hasActiveConnection_{false};
 
+  QTimer inviteTimer_;
+  std::string invitedDeviceId_;
+
   QTimer reconnectTimer_;
   bool reconnectInFlight_{false};
   std::chrono::steady_clock::time_point reconnectDeadline_;
   QString lastRemoteHost_;
   quint16 lastRemotePort_{0};
 
-  // Audio pipeline. Only one direction is ever live at a time: we receive when
-  // a peer connects to us, and send when we connected out to a peer.
   std::unique_ptr<audio::AudioReceiver> audioReceiver_;
   std::unique_ptr<platform::VirtualMicBackend> virtualMic_;
   std::unique_ptr<audio::AudioSender> audioSender_;
   std::unique_ptr<platform::PipeWireAudioCapture> audioCapture_;
   platform::AudioServerKind audioServerKind_{platform::AudioServerKind::None};
 
-  // PipeWire delivers capture buffers on its realtime thread; park them here
-  // and hand them to the (Qt-thread) sender from a timer instead.
   std::mutex captureMutex_;
   std::vector<int16_t> capturedSamples_;
   QTimer captureDrainTimer_;
 };
 
-}  // namespace wiremic::core
+}

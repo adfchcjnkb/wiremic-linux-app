@@ -55,4 +55,4 @@ class PipeWireVirtualMic {
   bool running_{false};
 };
 
-}  // namespace wiremic::platform
+}

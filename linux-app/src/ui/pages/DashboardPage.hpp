@@ -37,4 +37,4 @@ class DashboardPage : public QWidget {
   QString backendName_{QStringLiteral("none")};
 };
 
-}  // namespace wiremic::ui
+}

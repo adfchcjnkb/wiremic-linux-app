@@ -17,4 +17,4 @@ class StatCard : public GlassPanel {
   QLabel* valueLabel_;
 };
 
-}  // namespace wiremic::ui
+}

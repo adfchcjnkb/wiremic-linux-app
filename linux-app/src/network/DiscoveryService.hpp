@@ -24,8 +24,10 @@ class DiscoveryService : public QObject {
   bool start();
   void stop();
   void refreshNow();
+  bool sendInvite(const protocol::ConnectInvite& invite);
   [[nodiscard]] std::vector<DiscoveredDevice> devices() const;
  signals:
+  void inviteReceived(const protocol::ConnectInvite& invite);
   void deviceDiscovered(const DiscoveredDevice& device);
   void deviceUpdated(const DiscoveredDevice& device);
   void deviceStatusChanged(const QString& deviceId, DeviceStatus status);
@@ -40,6 +42,7 @@ class DiscoveryService : public QObject {
   bool bindSocket();
   void scheduleRebind();
   void sendAnnounce();
+  bool broadcast(const QByteArray& bytes);
   void handlePacket(const QByteArray& data, const QHostAddress& sender);
   protocol::DeviceInfo localDevice_;
   QUdpSocket socket_;
@@ -51,4 +54,4 @@ class DiscoveryService : public QObject {
   bool running_{false};
   bool bound_{false};
 };
-}  // namespace wiremic::network
+}

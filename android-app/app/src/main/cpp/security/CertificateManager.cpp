@@ -107,7 +107,7 @@ void WriteFile(const std::filesystem::path& path, const std::string& data) {
   stream << data;
 }
 
-}  // namespace
+}
 
 std::optional<std::string> CertificateManager::ComputeFingerprint(
     const std::string& certificatePem) {
@@ -185,4 +185,4 @@ Certificate CertificateManager::LoadOrCreate() {
   return generated;
 }
 
-}  // namespace wiremic::security
+}

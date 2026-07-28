@@ -67,4 +67,4 @@ void LogsPage::appendLog(const QString& timestamp, const QString& message) {
       this, [bar]() { bar->setValue(bar->maximum()); }, Qt::QueuedConnection);
 }
 
-}  // namespace wiremic::ui
+}

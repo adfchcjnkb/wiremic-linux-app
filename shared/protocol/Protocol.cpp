@@ -208,7 +208,7 @@ AudioSession AudioSessionFromJson(const json& node) {
   return session;
 }
 
-}  // namespace
+}
 
 std::string ToJson(const AnnouncePacket& packet) {
   json node{
@@ -232,6 +232,38 @@ std::optional<AnnouncePacket> ParseAnnounce(const std::string& text) {
     packet.device = *device;
     packet.protoVersion = node.value("protoVersion", kProtocolVersion);
     return packet;
+  } catch (const json::exception&) {
+    return std::nullopt;
+  }
+}
+
+std::string ToJson(const ConnectInvite& invite) {
+  json node{
+      {"type", "CONNECT_INVITE"},
+      {"inviteId", invite.inviteId},
+      {"targetDeviceId", invite.targetDeviceId},
+      {"device", DeviceToJson(invite.device)},
+      {"protoVersion", invite.protoVersion},
+  };
+  return node.dump();
+}
+
+std::optional<ConnectInvite> ParseInvite(const std::string& text) {
+  try {
+    json node = json::parse(text, nullptr, false);
+    if (node.is_discarded() || node.value("type", "") != "CONNECT_INVITE") {
+      return std::nullopt;
+    }
+    auto device = DeviceFromJson(node.value("device", json::object()));
+    if (!device) return std::nullopt;
+
+    ConnectInvite invite;
+    invite.inviteId = node.value("inviteId", "");
+    invite.targetDeviceId = node.value("targetDeviceId", "");
+    invite.device = *device;
+    invite.protoVersion = node.value("protoVersion", kProtocolVersion);
+    if (invite.targetDeviceId.empty()) return std::nullopt;
+    return invite;
   } catch (const json::exception&) {
     return std::nullopt;
   }
@@ -277,7 +309,6 @@ std::optional<ConnectRequest> ParseConnectRequest(const std::string& text) {
         ParseCodec(capabilities.value("codec", "opus"));
     request.capabilities.maxBitrateKbps =
         capabilities.value("maxBitrateKbps", 128u);
-    // Absent on peers predating the field, which only ever acted as senders.
     request.protoVersion = node.value("protoVersion", kProtocolVersion);
     request.audioRole = ParseAudioRole(node.value("audioRole", "sender"))
                             .value_or(AudioRole::Sender);
@@ -346,7 +377,7 @@ DisconnectReason ParseDisconnectReason(const std::string& value) {
   return DisconnectReason::UserRequested;
 }
 
-}  // namespace
+}
 
 ControlMessageType PeekMessageType(const std::string& text) {
   try {
@@ -420,4 +451,4 @@ std::optional<DisconnectMessage> ParseDisconnect(const std::string& text) {
   }
 }
 
-}  // namespace wiremic::protocol
+}

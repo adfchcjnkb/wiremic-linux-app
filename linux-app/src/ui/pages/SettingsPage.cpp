@@ -37,7 +37,7 @@ QWidget* MakeSettingRow(QWidget* parent, const QString& title,
   return row;
 }
 
-}  // namespace
+}
 
 SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
   auto* rootLayout = new QVBoxLayout(this);
@@ -135,4 +135,4 @@ void SettingsPage::setTrustedDevices(const QStringList& ids,
   emptyLabel_->setVisible(ids.isEmpty());
 }
 
-}  // namespace wiremic::ui
+}

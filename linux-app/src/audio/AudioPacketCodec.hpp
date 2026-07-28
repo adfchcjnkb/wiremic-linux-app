@@ -31,4 +31,4 @@ class AudioPacketCodec {
                                                        size_t length);
 };
 
-}  // namespace wiremic::audio
+}

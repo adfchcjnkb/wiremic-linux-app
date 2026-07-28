@@ -61,7 +61,7 @@ void DeviceRow::setData(const DeviceRowData& data) {
 
 void DeviceRow::setBusy(bool busy) { connectButton_->setBusy(busy); }
 
-void DeviceRow::paintEvent(QPaintEvent* /*event*/) {
+void DeviceRow::paintEvent(QPaintEvent* ) {
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
 
@@ -95,4 +95,4 @@ void DeviceRow::paintEvent(QPaintEvent* /*event*/) {
   painter.drawEllipse(QPointF(width() - 130, height() / 2.0), 4, 4);
 }
 
-}  // namespace wiremic::ui
+}

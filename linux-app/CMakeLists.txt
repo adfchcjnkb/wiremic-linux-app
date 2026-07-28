@@ -1,21 +1,16 @@
-# Qt6
 find_package(Qt6 REQUIRED COMPONENTS Core Network Widgets Svg)
 qt_standard_project_setup()
 
-# OpenSSL
 find_package(OpenSSL REQUIRED)
 
-# nlohmann_json
 find_package(nlohmann_json 3.11 REQUIRED)
 
-# PipeWire
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 pkg_check_modules(SPA REQUIRED IMPORTED_TARGET libspa-0.2)
 pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse-simple libpulse)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 
-# Security library
 add_library(wiremic_security STATIC
     src/core/security/CertificateManager.cpp
     src/core/security/TrustedDeviceStore.cpp
@@ -33,7 +28,6 @@ target_link_libraries(wiremic_security PUBLIC
 
 target_compile_features(wiremic_security PUBLIC cxx_std_20)
 
-# Network library
 add_library(wiremic_network STATIC
     src/network/DiscoveryService.cpp
     src/network/ControlServer.cpp
@@ -54,7 +48,6 @@ target_link_libraries(wiremic_network PUBLIC
 
 target_compile_features(wiremic_network PUBLIC cxx_std_20)
 
-# Platform library
 add_library(wiremic_platform STATIC
     src/platform/PipeWireVirtualMic.cpp
     src/platform/PipeWireAudioCapture.cpp
@@ -78,7 +71,6 @@ target_link_libraries(wiremic_platform PUBLIC
 
 target_compile_features(wiremic_platform PUBLIC cxx_std_20)
 
-# Audio library
 add_library(wiremic_audio STATIC
     src/audio/AudioPacketCodec.cpp
     src/audio/OpusCodec.cpp
@@ -100,7 +92,6 @@ target_link_libraries(wiremic_audio PUBLIC
 
 target_compile_features(wiremic_audio PUBLIC cxx_std_20)
 
-# Core library
 add_library(wiremic_core STATIC
     src/core/ConnectionManager.cpp
 )
@@ -122,7 +113,6 @@ target_link_libraries(wiremic_core PUBLIC
 
 target_compile_features(wiremic_core PUBLIC cxx_std_20)
 
-# Main executable
 qt_add_executable(wiremic
     src/main.cpp
     src/ui/AppController.cpp
@@ -190,10 +180,9 @@ target_compile_features(wiremic PUBLIC cxx_std_20)
 install(TARGETS wiremic RUNTIME DESTINATION bin)
 install(FILES resources/icons/app_icon.svg DESTINATION share/icons/hicolor/scalable/apps RENAME wiremic.svg)
 
-# Tests
 if(WIREMIC_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)
-    
+
     add_executable(wiremic_widget_interaction_test
         src/ui/tests/widget_interaction_test.cpp
         src/ui/IconLoader.cpp
@@ -233,14 +222,11 @@ if(WIREMIC_BUILD_TESTS)
         Qt6::Widgets Qt6::Svg Qt6::Test wiremic_testing)
     add_test(NAME icon_distinctness COMMAND wiremic_icon_distinctness_test -platform offscreen)
 
-    # wiremic_add_test(<ctest name> <source> <libs...>)
     function(wiremic_add_test test_name source)
         set(target "wiremic_${test_name}_test")
         add_executable(${target} ${source})
         target_link_libraries(${target} PRIVATE wiremic_testing ${ARGN})
         add_test(NAME ${test_name} COMMAND ${target})
-        # Anything touching a real audio server or the network can hang rather
-        # than fail; bound it so a stuck test cannot wedge the whole run.
         set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
     endfunction()
 

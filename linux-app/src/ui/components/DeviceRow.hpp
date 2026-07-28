@@ -35,4 +35,4 @@ class DeviceRow : public QWidget {
   GlassButton* connectButton_;
 };
 
-}  // namespace wiremic::ui
+}

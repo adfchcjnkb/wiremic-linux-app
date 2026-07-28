@@ -64,6 +64,7 @@ class ConnectionManager {
  private:
   protocol::AudioCapabilities localCapabilities() const;
   void setState(protocol::ConnectionState state);
+  void onInvite(protocol::ConnectInvite invite);
 
   protocol::DeviceInfo localDevice_;
   std::filesystem::path appDataDir_;
@@ -79,6 +80,7 @@ class ConnectionManager {
   std::unordered_map<std::string, DiscoveredDevice> devices_;
   PeerState activeConnection_;
   bool hasActiveConnection_{false};
+  std::string lastInviteId_;
 
   DeviceListCallback deviceListCallback_;
   StateCallback stateCallback_;
@@ -88,4 +90,4 @@ class ConnectionManager {
   ErrorCallback errorCallback_;
 };
 
-}  // namespace wiremic::android
+}

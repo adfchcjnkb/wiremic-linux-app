@@ -31,4 +31,4 @@ inline constexpr int kRadiusMedium = 16;
 inline constexpr int kRadiusLarge = 22;
 inline constexpr int kRadiusXLarge = 26;
 
-}  // namespace wiremic::ui::theme
+}

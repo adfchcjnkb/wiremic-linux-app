@@ -19,4 +19,4 @@ class AudioDeviceLister {
       int timeoutMs = 1500);
 };
 
-}  // namespace wiremic::platform
+}

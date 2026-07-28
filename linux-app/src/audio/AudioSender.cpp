@@ -45,9 +45,6 @@ int AudioSender::frameSamples() const {
 void AudioSender::pushPcmFrame(const int16_t* pcm, int frameSamples) {
   if (!running_) return;
 
-  // Encode and encrypt both throw. This runs from a timer slot, so letting an
-  // exception escape would unwind through the Qt event loop and abort the whole
-  // application over a single bad frame — drop the frame instead.
   try {
     const auto opusPayload = encoder_->Encode(pcm, frameSamples);
     if (opusPayload.empty()) return;
@@ -65,8 +62,6 @@ void AudioSender::pushPcmFrame(const int16_t* pcm, int frameSamples) {
                            static_cast<qint64>(packet.size()), remoteHost_,
                            remotePort_);
   } catch (const std::exception& e) {
-    // One failure usually means every following frame fails too, so report
-    // only the first rather than flooding the log at one message per frame.
     if (!encodeErrorReported_) {
       encodeErrorReported_ = true;
       emit errorOccurred(
@@ -75,4 +70,4 @@ void AudioSender::pushPcmFrame(const int16_t* pcm, int frameSamples) {
   }
 }
 
-}  // namespace wiremic::audio
+}

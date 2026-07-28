@@ -37,4 +37,4 @@ class GlassButton : public QPushButton {
   int spinTimerId_{-1};
 };
 
-}  // namespace wiremic::ui
+}

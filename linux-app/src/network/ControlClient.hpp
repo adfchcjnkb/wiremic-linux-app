@@ -53,9 +53,7 @@ class ControlClient : public QObject {
   uint64_t lastAckedSequence_{0};
   int missedKeepAlives_{0};
   bool sessionActive_{false};
-  // Set whenever the teardown is one we caused (or already reported), so
-  // onDisconnected() knows not to report the socket closing as a surprise loss.
   bool lossReported_{false};
 };
 
-}  // namespace wiremic::network
+}

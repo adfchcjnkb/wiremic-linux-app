@@ -35,7 +35,7 @@ class PulseAudioBackend final : public VirtualMicBackend {
   PulseAudioVirtualMic impl_;
 };
 
-}  // namespace
+}
 
 AudioServerKind DetectAudioServer() {
   if (PipeWireVirtualMic::IsPipeWireAvailable()) {
@@ -64,4 +64,4 @@ std::unique_ptr<VirtualMicBackend> CreateVirtualMic(
   return nullptr;
 }
 
-}  // namespace wiremic::platform
+}

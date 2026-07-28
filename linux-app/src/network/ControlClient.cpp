@@ -15,7 +15,7 @@ QSslKey KeyFromPem(const std::string& pem) {
                  QSsl::PrivateKey);
 }
 
-}  // namespace
+}
 
 QString ControlClient::peerCertificateFingerprint() const {
   const auto certificate = socket_.peerCertificate();
@@ -51,8 +51,6 @@ ControlClient::ControlClient(security::CertificateManager& certificateManager,
 }
 
 ControlClient::~ControlClient() {
-  // Tearing the client down is never a "connection lost" event, and the
-  // socket must not run a slot on a half-destroyed object on its way out.
   lossReported_ = true;
   sessionActive_ = false;
   socket_.disconnect(this);
@@ -204,10 +202,6 @@ void ControlClient::onDisconnected() {
   keepAliveTimer_.stop();
   sessionActive_ = false;
 
-  // The peer's socket going away is the usual way a connection dies (phone
-  // leaves the network, app killed). Without reporting it the manager stays
-  // "connected" forever: audio keeps running, and every later attempt is
-  // refused with ALREADY_CONNECTED.
   if (wasStreaming && !lossReported_) {
     lossReported_ = true;
     emit connectionLost(QString::fromStdString(pendingRequest_.requestId));
@@ -223,4 +217,4 @@ void ControlClient::onTimeout() {
   socket_.abort();
 }
 
-}  // namespace wiremic::network
+}

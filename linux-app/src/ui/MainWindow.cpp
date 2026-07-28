@@ -152,8 +152,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   dashboardPage_->setControlPort(controller_.controlPort());
   settingsPage_->setToggleStates(controller_.autoConnect(),
                                   controller_.rememberTrustedDevices());
-  // Paint the real state once at startup instead of waiting for the first
-  // signal, so a restart with already-trusted devices isn't shown as empty.
   refreshDevicesUi();
   refreshTrustedUi();
   refreshConnectionUi();
@@ -215,4 +213,4 @@ void MainWindow::showEvent(QShowEvent* event) {
   qDebug() << "MainWindow showEvent called";
   QMainWindow::showEvent(event);
 }
-}  // namespace wiremic::ui
+}

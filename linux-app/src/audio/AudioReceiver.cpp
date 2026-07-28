@@ -30,9 +30,6 @@ bool AudioReceiver::start() {
     return false;
   }
 
-  // The bound port is handed to the peer so it knows where to send. If we
-  // cannot determine it, fail here rather than advertising port 0 and ending
-  // up "connected" with no audio ever arriving.
   localPort_ = socket_.localPort();
   if (localPort_ == 0) {
     socket_.close();
@@ -134,4 +131,4 @@ void AudioReceiver::onPlayoutTick() {
   }
 }
 
-}  // namespace wiremic::audio
+}

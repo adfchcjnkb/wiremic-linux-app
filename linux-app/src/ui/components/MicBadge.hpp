@@ -28,4 +28,4 @@ class MicBadge : public QWidget {
   QPropertyAnimation* pulseAnimation_{nullptr};
 };
 
-}  // namespace wiremic::ui
+}

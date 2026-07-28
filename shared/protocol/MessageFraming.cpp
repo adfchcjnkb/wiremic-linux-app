@@ -44,4 +44,4 @@ std::optional<std::string> MessageFramer::NextMessage() {
   return message;
 }
 
-}  // namespace wiremic::protocol
+}

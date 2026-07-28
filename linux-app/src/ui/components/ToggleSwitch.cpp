@@ -47,7 +47,7 @@ void ToggleSwitch::mousePressEvent(QMouseEvent* event) {
   QWidget::mousePressEvent(event);
 }
 
-void ToggleSwitch::paintEvent(QPaintEvent* /*event*/) {
+void ToggleSwitch::paintEvent(QPaintEvent* ) {
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
 
@@ -80,4 +80,4 @@ void ToggleSwitch::paintEvent(QPaintEvent* /*event*/) {
   painter.drawEllipse(knobRect);
 }
 
-}  // namespace wiremic::ui
+}

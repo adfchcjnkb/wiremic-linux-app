@@ -19,8 +19,8 @@ struct ListerContext {
   bool done{false};
 };
 
-void OnGlobal(void* data, uint32_t id, uint32_t /*permissions*/,
-              const char* type, uint32_t /*version*/,
+void OnGlobal(void* data, uint32_t id, uint32_t ,
+              const char* type, uint32_t ,
               const struct spa_dict* props) {
   auto* ctx = static_cast<ListerContext*>(data);
   if (!props || std::strcmp(type, PW_TYPE_INTERFACE_Node) != 0) return;
@@ -52,7 +52,7 @@ void OnCoreDone(void* data, uint32_t id, int seq) {
   }
 }
 
-}  // namespace
+}
 
 std::vector<AudioInputDevice> AudioDeviceLister::ListInputDevices(
     int timeoutMs) {
@@ -134,4 +134,4 @@ std::vector<AudioInputDevice> AudioDeviceLister::ListInputDevices(
   return ctx.devices;
 }
 
-}  // namespace wiremic::platform
+}

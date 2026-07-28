@@ -12,6 +12,7 @@ class MessageFramer {
  public:
   void Feed(const char* data, size_t length);
   std::optional<std::string> NextMessage();
+  void Reset();
 
  private:
   std::string buffer_;
@@ -19,4 +20,4 @@ class MessageFramer {
 
 std::string FrameMessage(const std::string& payload);
 
-}  // namespace wiremic::protocol
+}

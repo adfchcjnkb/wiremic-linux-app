@@ -31,4 +31,4 @@ class ToggleSwitch : public QWidget {
   qreal knobPosition_{0.0};
 };
 
-}  // namespace wiremic::ui
+}

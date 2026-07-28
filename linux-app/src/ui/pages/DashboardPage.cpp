@@ -65,8 +65,6 @@ void DashboardPage::setConnected(bool connected, const QString& peerName) {
 void DashboardPage::setVirtualMic(bool active, const QString& backendName) {
   micActive_ = active;
   backendName_ = backendName;
-  // The badge tracks the microphone, not the control channel: it lights up
-  // only once audio is really reaching the system.
   if (micBadge_) micBadge_->setActive(active);
   if (micCard_) {
     micCard_->setValue(active ? backendName : QStringLiteral("Off"),
@@ -100,4 +98,4 @@ void DashboardPage::setControlPort(quint16 port) {
 void DashboardPage::setLocalDeviceName(const QString& name) {
   if (localNameLabel_) localNameLabel_->setText(name);
 }
-}  // namespace wiremic::ui
+}

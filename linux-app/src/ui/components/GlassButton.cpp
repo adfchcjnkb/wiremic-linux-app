@@ -101,4 +101,4 @@ void GlassButton::paintEvent(QPaintEvent*) {
   painter.setFont(f);
   painter.drawText(bounds, Qt::AlignCenter, text());
 }
-}  // namespace wiremic::ui
+}

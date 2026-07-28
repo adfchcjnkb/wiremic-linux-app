@@ -57,7 +57,7 @@ bool LoadCertificateIntoContext(SSL_CTX* ctx,
   return keyOk;
 }
 
-}  // namespace
+}
 
 ControlClient::ControlClient(security::CertificateManager& certificateManager)
     : certificateManager_(certificateManager) {}
@@ -287,4 +287,4 @@ void ControlClient::run(std::string host, uint16_t port,
   closeConnection();
 }
 
-}  // namespace wiremic::android
+}

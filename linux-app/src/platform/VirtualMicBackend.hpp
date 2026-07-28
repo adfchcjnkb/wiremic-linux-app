@@ -22,4 +22,4 @@ class VirtualMicBackend {
 [[nodiscard]] std::unique_ptr<VirtualMicBackend> CreateVirtualMic(
     const VirtualMicConfig& config, AudioServerKind preferredKind = AudioServerKind::None);
 
-}  // namespace wiremic::platform
+}

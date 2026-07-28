@@ -36,4 +36,4 @@ class TrustedDeviceStore {
   std::unordered_map<std::string, TrustedDevice> devices_;
 };
 
-}  // namespace wiremic::security
+}

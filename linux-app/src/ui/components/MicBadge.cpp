@@ -58,4 +58,4 @@ void MicBadge::paintEvent(QPaintEvent*) {
     QPixmap icon = IconLoader::Render(":/WireMic/resources/icons/icon_microphone.svg", iconSize * 2, tint);
     if (!icon.isNull()) painter.drawPixmap(QRectF(center.x() - iconSize / 2.0, center.y() - iconSize / 2.0, iconSize, iconSize), icon, icon.rect());
 }
-}  // namespace wiremic::ui
+}

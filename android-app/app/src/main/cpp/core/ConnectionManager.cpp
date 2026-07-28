@@ -25,7 +25,7 @@ std::string GenerateUuidV4() {
   return std::string(buffer);
 }
 
-}  // namespace
+}
 
 ConnectionManager::ConnectionManager(protocol::DeviceInfo localDevice,
                                       std::filesystem::path appDataDir,
@@ -48,6 +48,9 @@ bool ConnectionManager::start() {
     }
     if (deviceListCallback_) deviceListCallback_(std::move(list));
   });
+
+  discovery_->setInviteCallback(
+      [this](protocol::ConnectInvite invite) { onInvite(std::move(invite)); });
 
   return discovery_->start();
 }
@@ -107,6 +110,28 @@ void ConnectionManager::setState(protocol::ConnectionState state) {
     activeConnection_.state = state;
   }
   if (stateCallback_) stateCallback_(state);
+}
+
+void ConnectionManager::onInvite(protocol::ConnectInvite invite) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (hasActiveConnection_) return;
+    if (invite.inviteId == lastInviteId_) return;
+    lastInviteId_ = invite.inviteId;
+
+    auto it = devices_.find(invite.device.id);
+    if (it == devices_.end()) {
+      DiscoveredDevice discovered;
+      discovered.info = invite.device;
+      discovered.status = DeviceStatus::Online;
+      discovered.lastSeen = std::chrono::steady_clock::now();
+      devices_[invite.device.id] = discovered;
+    } else if (it->second.info.ip.empty()) {
+      it->second.info.ip = invite.device.ip;
+    }
+  }
+
+  requestConnection(invite.device.id);
 }
 
 void ConnectionManager::requestConnection(const std::string& deviceId) {
@@ -249,4 +274,4 @@ void ConnectionManager::disconnectActive() {
 
 void ConnectionManager::refreshDiscovery() {}
 
-}  // namespace wiremic::android
+}

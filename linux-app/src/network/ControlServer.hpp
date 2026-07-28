@@ -76,4 +76,4 @@ class ControlServer : public QObject {
   std::unordered_map<std::string, QSslSocket*> requestToSocket_;
 };
 
-}  // namespace wiremic::network
+}

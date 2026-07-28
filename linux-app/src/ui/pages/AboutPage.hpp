@@ -11,4 +11,4 @@ class AboutPage : public QWidget {
   explicit AboutPage(QWidget* parent = nullptr);
 };
 
-}  // namespace wiremic::ui
+}

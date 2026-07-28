@@ -121,4 +121,4 @@ void ConnectedDevicePage::setConnected(bool connected, const QString& name,
   Q_UNUSED(platform);
 }
 
-}  // namespace wiremic::ui
+}

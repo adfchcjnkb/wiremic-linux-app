@@ -25,4 +25,4 @@ class GlassPanel : public QWidget {
   bool elevated_{true};
 };
 
-}  // namespace wiremic::ui
+}

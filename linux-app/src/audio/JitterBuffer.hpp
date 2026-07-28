@@ -54,4 +54,4 @@ class JitterBuffer {
   bool haveLastGrowthTime_{false};
 };
 
-}  // namespace wiremic::audio
+}

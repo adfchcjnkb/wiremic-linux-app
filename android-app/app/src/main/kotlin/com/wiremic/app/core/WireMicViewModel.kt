@@ -1,6 +1,8 @@
 package com.wiremic.app.core
 
 import android.app.Application
+import android.content.Context
+import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,11 +31,13 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
     val connectingDeviceId: StateFlow<String?> = _connectingDeviceId.asStateFlow()
 
     private var started = false
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     fun start() {
         if (started) return
         started = true
 
+        acquireMulticastLock()
         NativeBridge.nativeSetListener(this)
 
         val prefs = getApplication<Application>().getSharedPreferences("wiremic", 0)
@@ -55,6 +59,27 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
     fun stop() {
         started = false
         NativeBridge.nativeStop()
+        releaseMulticastLock()
+    }
+
+    private fun acquireMulticastLock() {
+        if (multicastLock != null) return
+        runCatching {
+            val wifi = getApplication<Application>()
+                .applicationContext
+                .getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val lock = wifi.createMulticastLock("wiremic-discovery")
+            lock.setReferenceCounted(false)
+            lock.acquire()
+            multicastLock = lock
+        }
+    }
+
+    private fun releaseMulticastLock() {
+        runCatching {
+            multicastLock?.takeIf { it.isHeld }?.release()
+        }
+        multicastLock = null
     }
 
     fun connect(deviceId: String) {
@@ -104,5 +129,6 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
     override fun onCleared() {
         super.onCleared()
         NativeBridge.nativeSetListener(null)
+        releaseMulticastLock()
     }
 }

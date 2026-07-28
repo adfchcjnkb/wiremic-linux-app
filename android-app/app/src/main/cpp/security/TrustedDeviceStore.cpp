@@ -97,4 +97,4 @@ std::optional<TrustedDevice> TrustedDeviceStore::Find(
   return it->second;
 }
 
-}  // namespace wiremic::security
+}

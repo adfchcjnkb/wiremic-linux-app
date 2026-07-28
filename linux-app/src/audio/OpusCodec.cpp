@@ -85,4 +85,4 @@ std::vector<int16_t> OpusFrameDecoder::DecodePacketLoss(int frameSamples) {
   return pcm;
 }
 
-}  // namespace wiremic::audio
+}

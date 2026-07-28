@@ -39,4 +39,4 @@ class OpusFrameDecoder {
   int channels_;
 };
 
-}  // namespace wiremic::audio
+}

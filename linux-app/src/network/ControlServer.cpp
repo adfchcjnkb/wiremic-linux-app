@@ -25,13 +25,11 @@ QString FingerprintOf(const QSslCertificate& certificate) {
          certificate.digest(QCryptographicHash::Sha256).toHex();
 }
 
-}  // namespace
+}
 
 void ControlTcpServer::incomingConnection(qintptr handle) {
   auto* socket = new QSslSocket(this);
   if (!socket->setSocketDescriptor(handle)) {
-    // Report instead of dropping the client on the floor, and close the
-    // descriptor we were handed — QSslSocket never adopted it.
     emit connectionSetupFailed(socket->errorString());
     delete socket;
     ::close(static_cast<int>(handle));
@@ -78,9 +76,6 @@ bool ControlServer::start() {
 }
 
 void ControlServer::stop() {
-  // disconnectFromHost() can emit disconnected() synchronously, which runs
-  // onDisconnected() and erases from sessions_. Snapshot the sockets first so
-  // we never iterate a container that a slot is mutating underneath us.
   std::vector<QSslSocket*> sockets;
   sockets.reserve(sessions_.size());
   for (const auto& [socket, session] : sessions_) sockets.push_back(socket);
@@ -98,10 +93,6 @@ void ControlServer::onNewSslConnection(QSslSocket* socket) {
   const auto& localCert = certificateManager_.localCertificate();
   socket->setLocalCertificate(CertificateFromPem(localCert.certificatePem));
   socket->setPrivateKey(KeyFromPem(localCert.privateKeyPem));
-  // VerifyPeer requires the client to present a certificate. Chain validation
-  // can never succeed against self-signed device certs, so onSslErrors()
-  // ignores those specific errors; the real authentication is the SHA-256
-  // fingerprint pin applied in processMessage() (trust-on-first-use).
   socket->setPeerVerifyMode(QSslSocket::VerifyPeer);
 
   connect(socket, &QSslSocket::encrypted, this, &ControlServer::onEncrypted);
@@ -111,8 +102,6 @@ void ControlServer::onNewSslConnection(QSslSocket* socket) {
           this, &ControlServer::onSslErrors);
   connect(socket, &QSslSocket::disconnected, this,
           &ControlServer::onDisconnected);
-  // Without this a failed TLS handshake is completely silent on the server
-  // side: the client just sees the connection drop.
   connect(socket, &QSslSocket::errorOccurred, this,
           [this, socket](QAbstractSocket::SocketError) {
             emit errorOccurred(
@@ -153,9 +142,6 @@ void ControlServer::onReadyRead() {
   it->second.framer.Feed(data.constData(), static_cast<size_t>(data.size()));
 
   try {
-    // processMessage() may disconnect the socket, which runs onDisconnected()
-    // and erases the session — invalidating `it`. Re-look it up every pass and
-    // stop as soon as the session is gone.
     while (true) {
       auto sessionIt = sessions_.find(socket);
       if (sessionIt == sessions_.end()) return;
@@ -218,9 +204,6 @@ void ControlServer::processMessage(QSslSocket* socket,
   const QString claimedFingerprint =
       QString::fromStdString(request->certFingerprint);
 
-  // A peer that presented no certificate has nothing to pin, so there is no
-  // way to recognise it on a later reconnect. Refuse it outright rather than
-  // comparing two empty-ish fingerprints.
   if (peerCertificate.isNull() || claimedFingerprint.isEmpty() ||
       peerFingerprint != claimedFingerprint) {
     protocol::ConnectResponse rejection;
@@ -301,9 +284,6 @@ void ControlServer::onDisconnected() {
     const std::string requestId = it->second.requestId;
     sessions_.erase(it);
     if (!requestId.empty()) {
-      // Only drop the mapping if it still points at this socket. A peer that
-      // reconnects reuses its requestId, and a late disconnect from the old
-      // socket must not unhook the new one.
       auto mapped = requestToSocket_.find(requestId);
       if (mapped != requestToSocket_.end() && mapped->second == socket) {
         requestToSocket_.erase(mapped);
@@ -315,4 +295,4 @@ void ControlServer::onDisconnected() {
   socket->deleteLater();
 }
 
-}  // namespace wiremic::network
+}

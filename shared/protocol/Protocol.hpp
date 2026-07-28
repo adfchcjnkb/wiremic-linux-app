@@ -80,14 +80,6 @@ struct AudioSession {
   std::array<uint8_t, kSessionKeyBytes> sessionKey{};
 };
 
-// Which end of the pair produces audio. The initiator declares this so a
-// session can be started from either side while the microphone stays wherever
-// it physically is.
-//   Sender   - the initiator captures and sends to the responder's udpPort
-//              (a phone starting a session; the historical default).
-//   Receiver - the initiator wants to receive, and carries its own endpoint in
-//              `offeredSession`; the responder streams its microphone there
-//              (a desktop starting a session with a phone).
 enum class AudioRole : uint8_t { Sender, Receiver };
 
 struct ConnectRequest {
@@ -97,7 +89,6 @@ struct ConnectRequest {
   AudioCapabilities capabilities;
   uint16_t protoVersion{kProtocolVersion};
   AudioRole audioRole{AudioRole::Sender};
-  // Only set when audioRole == Receiver: where the responder should send.
   std::optional<AudioSession> offeredSession;
 };
 
@@ -153,6 +144,16 @@ struct AnnouncePacket {
 std::string ToJson(const AnnouncePacket& packet);
 std::optional<AnnouncePacket> ParseAnnounce(const std::string& json);
 
+struct ConnectInvite {
+  std::string inviteId;
+  std::string targetDeviceId;
+  DeviceInfo device;
+  uint16_t protoVersion{kProtocolVersion};
+};
+
+std::string ToJson(const ConnectInvite& invite);
+std::optional<ConnectInvite> ParseInvite(const std::string& json);
+
 std::string ToJson(const ConnectRequest& request);
 std::optional<ConnectRequest> ParseConnectRequest(const std::string& json);
 
@@ -167,4 +168,4 @@ std::optional<AudioRole> ParseAudioRole(const std::string& value);
 std::optional<Platform> ParsePlatform(const std::string& value);
 std::optional<ConnectionType> ParseConnectionType(const std::string& value);
 
-}  // namespace wiremic::protocol
+}

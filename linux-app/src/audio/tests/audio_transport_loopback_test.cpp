@@ -32,7 +32,7 @@ bool WaitFor(std::function<bool()> predicate, int timeoutMs) {
   return predicate();
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
   QCoreApplication app(argc, argv);

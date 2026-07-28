@@ -122,7 +122,7 @@ void RunGuarded(const char* siteName, Func&& func) {
   }
 }
 
-}  // namespace
+}
 
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
   gJavaVm = vm;
@@ -179,6 +179,7 @@ Java_com_wiremic_app_core_NativeBridge_nativeStart(
     localDevice.model = modelChars;
     localDevice.platform = wiremic::protocol::Platform::Android;
     localDevice.connectionType = wiremic::protocol::ConnectionType::Wifi;
+    localDevice.controlPort = 0;
 
     const std::string dataDirStr = dirChars;
 

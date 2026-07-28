@@ -42,4 +42,4 @@ void GlassPanel::paintEvent(QPaintEvent*) {
     painter.setBrush(Qt::NoBrush);
     painter.drawPath(path);
 }
-}  // namespace wiremic::ui
+}

@@ -24,4 +24,4 @@ void StatCard::setValue(const QString& value, const QColor& color) {
         if (color.isValid()) valueLabel_->setStyleSheet(QString("color: rgb(%1,%2,%3); font-size: 22px; font-weight: 700;").arg(color.red()).arg(color.green()).arg(color.blue()));
     }
 }
-}  // namespace wiremic::ui
+}
