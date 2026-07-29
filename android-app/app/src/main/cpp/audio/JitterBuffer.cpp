@@ -7,6 +7,8 @@ namespace wiremic::audio {
 
 namespace {
 constexpr std::chrono::milliseconds kStableGrowthCooldown{500};
+
+constexpr int kDepthSlackFrames = 4;
 }
 
 JitterBuffer::JitterBuffer(uint8_t frameSizeMs, int minDepthFrames,
@@ -63,6 +65,13 @@ void JitterBuffer::UpdateJitterEstimate(
   }
 }
 
+int JitterBuffer::queuedLeadFrames() const {
+  if (!initialized_ || buffer_.empty()) return 0;
+  const uint64_t highest = buffer_.rbegin()->first;
+  if (highest < nextPlayoutSeq_) return 0;
+  return static_cast<int>(highest - nextPlayoutSeq_) + 1;
+}
+
 void JitterBuffer::Push(uint64_t sequence, std::vector<uint8_t> payload,
                          bool dtx,
                          std::chrono::steady_clock::time_point arrivalTime) {
@@ -78,6 +87,14 @@ void JitterBuffer::Push(uint64_t sequence, std::vector<uint8_t> payload,
   UpdateJitterEstimate(arrivalTime, sequence);
 
   buffer_[sequence] = Entry{std::move(payload), dtx};
+
+  const size_t maxBuffered =
+      static_cast<size_t>(maxDepthFrames_ + kDepthSlackFrames) + 2;
+  while (buffer_.size() > maxBuffered) {
+    const uint64_t oldest = buffer_.begin()->first;
+    buffer_.erase(buffer_.begin());
+    if (oldest >= nextPlayoutSeq_) nextPlayoutSeq_ = oldest + 1;
+  }
 }
 
 JitterPopOutcome JitterBuffer::Pop() {
@@ -86,6 +103,15 @@ JitterPopOutcome JitterBuffer::Pop() {
   }
 
   const uint64_t highestBuffered = buffer_.rbegin()->first;
+
+  const uint64_t maxLead =
+      static_cast<uint64_t>(targetDepthFrames_ + kDepthSlackFrames);
+  if (highestBuffered >= nextPlayoutSeq_ + maxLead) {
+    nextPlayoutSeq_ =
+        highestBuffered + 1 - static_cast<uint64_t>(targetDepthFrames_);
+    buffer_.erase(buffer_.begin(), buffer_.lower_bound(nextPlayoutSeq_));
+  }
+
   if (highestBuffered < nextPlayoutSeq_ +
                              static_cast<uint64_t>(targetDepthFrames_) - 1) {
     return {JitterPopResult::NotReady, {}};

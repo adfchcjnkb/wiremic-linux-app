@@ -244,6 +244,9 @@ if(WIREMIC_BUILD_TESTS)
     wiremic_add_test(audio_transport_loopback
         src/audio/tests/audio_transport_loopback_test.cpp
         wiremic_audio Qt6::Core Qt6::Network)
+    wiremic_add_test(audio_latency
+        src/audio/tests/audio_latency_test.cpp
+        wiremic_audio Qt6::Core Qt6::Network)
 
     wiremic_add_test(control_channel_loopback
         src/network/tests/control_channel_loopback_test.cpp
