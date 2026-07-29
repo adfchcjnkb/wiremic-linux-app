@@ -1,5 +1,7 @@
 #include "UdpSocketBinder.hpp"
 
+#include <QNetworkProxy>
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -49,6 +51,8 @@ bool BindUdpSocket(QUdpSocket& socket, quint16 port, quint16& boundPort,
     ::close(fd);
     return false;
   }
+
+  socket.setProxy(QNetworkProxy::NoProxy);
 
   if (!socket.setSocketDescriptor(fd, QAbstractSocket::BoundState,
                                    QIODevice::ReadWrite)) {

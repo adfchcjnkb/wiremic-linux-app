@@ -1,5 +1,7 @@
 #include "ControlServer.hpp"
 
+#include <QNetworkProxy>
+
 #include <QCryptographicHash>
 
 #include <unistd.h>
@@ -64,6 +66,8 @@ bool ControlServer::start() {
                             .arg(QSslSocket::activeBackend()));
     return false;
   }
+
+  server_.setProxy(QNetworkProxy::NoProxy);
 
   if (!server_.listen(QHostAddress::Any, port_)) {
     emit errorOccurred(QStringLiteral("Failed to listen on port %1: %2")

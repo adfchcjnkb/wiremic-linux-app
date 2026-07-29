@@ -148,6 +148,7 @@ class ConnectionManager : public QObject {
   std::unique_ptr<audio::AudioSender> audioSender_;
   std::unique_ptr<platform::PipeWireAudioCapture> audioCapture_;
   platform::AudioServerKind audioServerKind_{platform::AudioServerKind::None};
+  QString publishedBackends_;
 
   std::mutex captureMutex_;
   std::vector<int16_t> capturedSamples_;

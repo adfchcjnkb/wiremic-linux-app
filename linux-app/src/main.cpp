@@ -6,6 +6,7 @@
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QFile>
+#include <QNetworkProxy>
 #include <QTimer>
 
 #include <cstdlib>
@@ -82,6 +83,7 @@ void ReportFatal(const QString& message) {
 int main(int argc, char** argv) {
   try {
     QApplication app(argc, argv);
+    QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
     app.setOrganizationName("WireMic");
     app.setApplicationName("WireMic");
     app.setApplicationDisplayName("WireMic");

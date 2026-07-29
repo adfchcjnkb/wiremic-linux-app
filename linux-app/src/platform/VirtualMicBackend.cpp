@@ -35,25 +35,98 @@ class PulseAudioBackend final : public VirtualMicBackend {
   PulseAudioVirtualMic impl_;
 };
 
+class CompositeBackend final : public VirtualMicBackend {
+ public:
+  void add(std::unique_ptr<VirtualMicBackend> backend) {
+    backends_.push_back(std::move(backend));
+  }
+
+  [[nodiscard]] bool empty() const { return backends_.empty(); }
+
+  bool start() override {
+    bool anyStarted = false;
+    for (auto& backend : backends_) {
+      if (backend->start()) anyStarted = true;
+    }
+    return anyStarted;
+  }
+
+  void stop() override {
+    for (auto& backend : backends_) backend->stop();
+  }
+
+  [[nodiscard]] bool isRunning() const override {
+    for (const auto& backend : backends_) {
+      if (backend->isRunning()) return true;
+    }
+    return false;
+  }
+
+  void pushSamples(const int16_t* interleaved, size_t sampleCount) override {
+    for (auto& backend : backends_) {
+      if (backend->isRunning()) backend->pushSamples(interleaved, sampleCount);
+    }
+  }
+
+ private:
+  std::vector<std::unique_ptr<VirtualMicBackend>> backends_;
+};
+
 }
 
-AudioServerKind DetectAudioServer() {
+std::vector<AudioServerKind> DetectAllAudioServers() {
+  std::vector<AudioServerKind> kinds;
+
   const auto flavour = PulseAudioVirtualMic::QueryServerFlavour();
 
   if (flavour == PulseAudioVirtualMic::ServerFlavour::PulseAudio) {
-    return AudioServerKind::PulseAudio;
+    kinds.push_back(AudioServerKind::PulseAudio);
   }
 
   if (PipeWireVirtualMic::IsPipeWireAvailable()) {
-    return AudioServerKind::PipeWire;
+    kinds.push_back(AudioServerKind::PipeWire);
   }
 
-  if (flavour == PulseAudioVirtualMic::ServerFlavour::PipeWirePulse ||
-      PulseAudioVirtualMic::IsPulseAudioAvailable()) {
-    return AudioServerKind::PulseAudio;
+  if (kinds.empty() &&
+      (flavour == PulseAudioVirtualMic::ServerFlavour::PipeWirePulse ||
+       PulseAudioVirtualMic::IsPulseAudioAvailable())) {
+    kinds.push_back(AudioServerKind::PulseAudio);
   }
 
-  return AudioServerKind::None;
+  return kinds;
+}
+
+std::unique_ptr<VirtualMicBackend> CreateVirtualMicOnAllServers(
+    const VirtualMicConfig& config, std::string* publishedOn) {
+  const auto kinds = DetectAllAudioServers();
+  if (kinds.empty()) {
+    if (publishedOn) publishedOn->clear();
+    return nullptr;
+  }
+
+  auto composite = std::make_unique<CompositeBackend>();
+  std::string names;
+
+  for (const auto kind : kinds) {
+    auto backend = CreateVirtualMic(config, kind);
+    if (!backend) continue;
+    composite->add(std::move(backend));
+    if (!names.empty()) names += " + ";
+    names += kind == AudioServerKind::PipeWire ? "PipeWire" : "PulseAudio";
+  }
+
+  if (composite->empty()) {
+    if (publishedOn) publishedOn->clear();
+    return nullptr;
+  }
+
+  if (publishedOn) *publishedOn = names;
+  return composite;
+}
+
+AudioServerKind DetectAudioServer() {
+  const auto kinds = DetectAllAudioServers();
+  return kinds.empty() ? AudioServerKind::None : kinds.front();
 }
 
 std::unique_ptr<VirtualMicBackend> CreateVirtualMic(

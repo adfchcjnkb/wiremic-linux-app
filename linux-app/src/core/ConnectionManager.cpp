@@ -142,7 +142,12 @@ bool ConnectionManager::ensureVirtualMic(uint32_t sampleRate,
   virtualMicConfig_.sampleRate = sampleRate;
   virtualMicConfig_.channels = channels;
 
-  virtualMic_ = platform::CreateVirtualMic(virtualMicConfig_, audioServerKind_);
+  std::string publishedOn;
+  virtualMic_ =
+      platform::CreateVirtualMicOnAllServers(virtualMicConfig_, &publishedOn);
+  if (!publishedOn.empty()) {
+    publishedBackends_ = QString::fromStdString(publishedOn);
+  }
   if (!virtualMic_) {
     emit errorOccurred(QStringLiteral(
         "No PipeWire or PulseAudio server is running — the virtual microphone "
@@ -281,6 +286,7 @@ bool ConnectionManager::virtualMicActive() const {
 }
 
 QString ConnectionManager::audioBackendName() const {
+  if (!publishedBackends_.isEmpty()) return publishedBackends_;
   return QString::fromLatin1(AudioServerName(audioServerKind_));
 }
 

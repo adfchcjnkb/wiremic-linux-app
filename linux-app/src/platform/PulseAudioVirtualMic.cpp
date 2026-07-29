@@ -172,6 +172,9 @@ bool PulseAudioVirtualMic::loadModules() {
 
     std::ostringstream cmd1;
     cmd1 << "pactl load-module module-null-sink sink_name=" << sinkName_
+         << " rate=" << config_.sampleRate
+         << " channels=" << static_cast<unsigned>(config_.channels)
+         << " format=s16le"
          << " sink_properties=device.description=WireMic_Virtual_Sink 2>/dev/null";
 
     if (!runPactlCommand(cmd1.str(), output)) {

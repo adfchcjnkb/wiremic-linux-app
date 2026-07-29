@@ -1,5 +1,7 @@
 #include "ControlClient.hpp"
 
+#include <QNetworkProxy>
+
 #include <QCryptographicHash>
 
 namespace wiremic::network {
@@ -81,6 +83,7 @@ void ControlClient::connectToDevice(const QString& host, quint16 port,
   socket_.setLocalCertificate(CertificateFromPem(localCert.certificatePem));
   socket_.setPrivateKey(KeyFromPem(localCert.privateKeyPem));
   socket_.setPeerVerifyMode(QSslSocket::VerifyNone);
+  socket_.setProxy(QNetworkProxy::NoProxy);
 
   timeoutTimer_.start(protocol::kConnectRequestTimeoutMs);
   socket_.connectToHostEncrypted(host, port);

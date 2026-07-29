@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "VirtualMicConfig.hpp"
 
@@ -19,7 +21,10 @@ class VirtualMicBackend {
 };
 
 [[nodiscard]] AudioServerKind DetectAudioServer();
+[[nodiscard]] std::vector<AudioServerKind> DetectAllAudioServers();
 [[nodiscard]] std::unique_ptr<VirtualMicBackend> CreateVirtualMic(
     const VirtualMicConfig& config, AudioServerKind preferredKind = AudioServerKind::None);
+[[nodiscard]] std::unique_ptr<VirtualMicBackend> CreateVirtualMicOnAllServers(
+    const VirtualMicConfig& config, std::string* publishedOn = nullptr);
 
 }
