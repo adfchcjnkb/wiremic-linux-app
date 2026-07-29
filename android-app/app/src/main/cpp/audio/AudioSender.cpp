@@ -1,5 +1,7 @@
 #include "AudioSender.hpp"
 
+#include "OpenSLESCapture.hpp"
+
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -71,93 +73,63 @@ bool AudioSender::start(const protocol::AudioSession& session,
     return false;
   }
 
-  AAudioStreamBuilder* builder = nullptr;
-  if (AAudio_createStreamBuilder(&builder) != AAUDIO_OK || !builder) {
-    if (errorCallback_) errorCallback_("failed to create AAudio stream builder");
+  std::string chosen;
+  capture_ = CreateAudioCapture(
+      [this](const void* frames, int32_t frameCount) {
+        handleAudioData(frames, frameCount);
+      },
+      &chosen);
+
+  if (!capture_) {
+    if (errorCallback_) errorCallback_("no audio capture backend is available");
     close(socketFd_);
     socketFd_ = -1;
     return false;
   }
 
-  AAudioStreamBuilder_setDirection(builder, AAUDIO_DIRECTION_INPUT);
-  AAudioStreamBuilder_setSampleRate(builder, static_cast<int32_t>(sampleRate_));
-  AAudioStreamBuilder_setChannelCount(builder, channels_);
-  AAudioStreamBuilder_setFormat(builder, AAUDIO_FORMAT_PCM_I16);
-  AAudioStreamBuilder_setPerformanceMode(builder,
-                                         AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
-  AAudioStreamBuilder_setSharingMode(builder, AAUDIO_SHARING_MODE_SHARED);
-#if __ANDROID_API__ >= 28
-  AAudioStreamBuilder_setInputPreset(builder, AAUDIO_INPUT_PRESET_VOICE_COMMUNICATION);
-#endif
-  AAudioStreamBuilder_setFramesPerDataCallback(builder, frameSamples_);
-  AAudioStreamBuilder_setDataCallback(builder, &AudioSender::OnAudioData, this);
-  AAudioStreamBuilder_setErrorCallback(builder, &AudioSender::OnStreamError, this);
+  if (!capture_->start(static_cast<int32_t>(sampleRate_), channels_,
+                       frameSamples_)) {
+    const std::string firstError = capture_->lastError();
 
-  const aaudio_result_t openResult =
-      AAudioStreamBuilder_openStream(builder, &stream_);
-  AAudioStreamBuilder_delete(builder);
+    // AAudio can refuse to open even where it exists -- another application
+    // holding the microphone exclusively, or a vendor bug. OpenSL ES is
+    // present on every release, so fall back to it rather than giving up.
+    capture_.reset();
+    capture_ = std::make_unique<OpenSLESCapture>(
+        [this](const void* frames, int32_t frameCount) {
+          handleAudioData(frames, frameCount);
+        });
+    chosen = "OpenSL ES";
 
-  if (openResult != AAUDIO_OK || !stream_) {
-    if (errorCallback_) errorCallback_("failed to open AAudio input stream");
-    close(socketFd_);
-    socketFd_ = -1;
-    return false;
+    if (!capture_->start(static_cast<int32_t>(sampleRate_), channels_,
+                         frameSamples_)) {
+      if (errorCallback_) {
+        errorCallback_("could not open the microphone (" + firstError +
+                        "; then " + capture_->lastError() + ")");
+      }
+      capture_.reset();
+      close(socketFd_);
+      socketFd_ = -1;
+      return false;
+    }
   }
 
-  streamSampleRate_ = AAudioStream_getSampleRate(stream_);
-  streamChannels_ = AAudioStream_getChannelCount(stream_);
-  streamFormat_ = AAudioStream_getFormat(stream_);
-
+  streamSampleRate_ = capture_->sampleRate();
+  streamChannels_ = capture_->channels();
+  streamIsFloat_ = capture_->isFloat();
   if (streamSampleRate_ <= 0) streamSampleRate_ = static_cast<int32_t>(sampleRate_);
   if (streamChannels_ <= 0) streamChannels_ = channels_;
 
   resampler_.Reset(streamSampleRate_, static_cast<int32_t>(sampleRate_));
 
-  if (streamFormat_ != AAUDIO_FORMAT_PCM_I16 &&
-      streamFormat_ != AAUDIO_FORMAT_PCM_FLOAT) {
-    if (errorCallback_) {
-      errorCallback_("microphone returned an unsupported sample format");
-    }
-    AAudioStream_close(stream_);
-    stream_ = nullptr;
-    close(socketFd_);
-    socketFd_ = -1;
-    return false;
-  }
-
-  if (streamSampleRate_ != static_cast<int32_t>(sampleRate_) ||
-      streamChannels_ != channels_ ||
-      streamFormat_ != AAUDIO_FORMAT_PCM_I16) {
-    if (errorCallback_) {
-      errorCallback_("microphone opened at " + std::to_string(streamSampleRate_) +
-                      " Hz / " + std::to_string(streamChannels_) +
-                      " ch; converting to " + std::to_string(sampleRate_) +
-                      " Hz / " + std::to_string(channels_) + " ch");
-    }
-  }
-
-  const int32_t framesPerBurst = AAudioStream_getFramesPerBurst(stream_);
-  const int32_t callbackFrames =
-      static_cast<int32_t>(static_cast<int64_t>(frameSamples_) *
-                            streamSampleRate_ / static_cast<int32_t>(sampleRate_));
-  int32_t desiredBuffer = callbackFrames * 2;
-  if (framesPerBurst > 0) {
-    const int32_t burstFloor = framesPerBurst * 2;
-    if (desiredBuffer < burstFloor) desiredBuffer = burstFloor;
-    const int32_t remainder = desiredBuffer % framesPerBurst;
-    if (remainder != 0) desiredBuffer += framesPerBurst - remainder;
-  }
-  if (desiredBuffer > 0) {
-    AAudioStream_setBufferSizeInFrames(stream_, desiredBuffer);
-  }
-
-  if (AAudioStream_requestStart(stream_) != AAUDIO_OK) {
-    if (errorCallback_) errorCallback_("failed to start AAudio input stream");
-    AAudioStream_close(stream_);
-    stream_ = nullptr;
-    close(socketFd_);
-    socketFd_ = -1;
-    return false;
+  if (errorCallback_ &&
+      (streamSampleRate_ != static_cast<int32_t>(sampleRate_) ||
+       streamChannels_ != channels_ || streamIsFloat_)) {
+    errorCallback_(std::string("microphone via ") + chosen + " opened at " +
+                    std::to_string(streamSampleRate_) + " Hz / " +
+                    std::to_string(streamChannels_) + " ch; converting to " +
+                    std::to_string(sampleRate_) + " Hz / " +
+                    std::to_string(channels_) + " ch");
   }
 
   running_ = true;
@@ -165,10 +137,9 @@ bool AudioSender::start(const protocol::AudioSession& session,
 }
 
 void AudioSender::stop() {
-  if (stream_) {
-    AAudioStream_requestStop(stream_);
-    AAudioStream_close(stream_);
-    stream_ = nullptr;
+  if (capture_) {
+    capture_->stop();
+    capture_.reset();
   }
   if (socketFd_ >= 0) {
     close(socketFd_);
@@ -181,24 +152,6 @@ void AudioSender::stop() {
   running_ = false;
 }
 
-aaudio_data_callback_result_t AudioSender::OnAudioData(AAudioStream* ,
-                                                         void* userdata,
-                                                         void* audioData,
-                                                         int32_t numFrames) {
-  auto* self = static_cast<AudioSender*>(userdata);
-  return self->handleAudioData(audioData, numFrames);
-}
-
-void AudioSender::OnStreamError(AAudioStream* , void* userdata,
-                                 aaudio_result_t error) {
-  auto* self = static_cast<AudioSender*>(userdata);
-  if (self->errorCallback_) {
-    self->errorCallback_(std::string("AAudio stream error: ") +
-                          AAudio_convertResultToText(error));
-  }
-  self->running_ = false;
-}
-
 void AudioSender::appendConverted(const void* frames, int32_t numFrames) {
   const size_t inFrames = static_cast<size_t>(numFrames);
   const size_t inChannels = static_cast<size_t>(streamChannels_);
@@ -207,7 +160,7 @@ void AudioSender::appendConverted(const void* frames, int32_t numFrames) {
   monoScratch_.clear();
   monoScratch_.reserve(inFrames);
 
-  if (streamFormat_ == AAUDIO_FORMAT_PCM_FLOAT) {
+  if (streamIsFloat_) {
     const auto* src = static_cast<const float*>(frames);
     for (size_t f = 0; f < inFrames; ++f) {
       double sum = 0.0;
@@ -230,18 +183,12 @@ void AudioSender::appendConverted(const void* frames, int32_t numFrames) {
   resampler_.Process(monoScratch_.data(), monoScratch_.size(), pending_);
 }
 
-aaudio_data_callback_result_t AudioSender::handleAudioData(
-    const void* frames, int32_t numFrames) {
-  if (!running_ || socketFd_ < 0 || !encoder_) {
-    return AAUDIO_CALLBACK_RESULT_CONTINUE;
-  }
-
-  if (frames == nullptr || numFrames <= 0) {
-    return AAUDIO_CALLBACK_RESULT_CONTINUE;
-  }
+void AudioSender::handleAudioData(const void* frames, int32_t numFrames) {
+  if (!running_ || socketFd_ < 0 || !encoder_) return;
+  if (frames == nullptr || numFrames <= 0) return;
 
   const size_t chunk = static_cast<size_t>(frameSamples_) * channels_;
-  if (chunk == 0) return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  if (chunk == 0) return;
 
   appendConverted(frames, numFrames);
 
@@ -285,7 +232,6 @@ aaudio_data_callback_result_t AudioSender::handleAudioData(
     pending_.erase(pending_.begin(), pending_.begin() + static_cast<long>(offset));
   }
 
-  return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
 }

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <aaudio/AAudio.h>
-
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -9,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "AudioCaptureBackend.hpp"
 #include "AudioPacketCodec.hpp"
 #include "MonoResampler.hpp"
 #include "OpusCodec.hpp"
@@ -31,21 +30,13 @@ class AudioSender {
   void setErrorCallback(ErrorCallback callback);
 
  private:
-  static aaudio_data_callback_result_t OnAudioData(AAudioStream* stream,
-                                                     void* userdata,
-                                                     void* audioData,
-                                                     int32_t numFrames);
-  static void OnStreamError(AAudioStream* stream, void* userdata,
-                             aaudio_result_t error);
-
-  aaudio_data_callback_result_t handleAudioData(const void* frames,
-                                                 int32_t numFrames);
+  void handleAudioData(const void* frames, int32_t numFrames);
 
   void appendConverted(const void* frames, int32_t numFrames);
 
   bool openUdpSocket(const std::string& host, uint16_t port);
 
-  AAudioStream* stream_{nullptr};
+  std::unique_ptr<AudioCaptureBackend> capture_;
   int socketFd_{-1};
   std::atomic<bool> running_{false};
 
@@ -58,7 +49,7 @@ class AudioSender {
 
   int32_t streamSampleRate_{0};
   int32_t streamChannels_{0};
-  aaudio_format_t streamFormat_{AAUDIO_FORMAT_PCM_I16};
+  bool streamIsFloat_{false};
   audio::MonoResampler resampler_;
   std::vector<int16_t> monoScratch_;
 

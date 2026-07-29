@@ -20,7 +20,14 @@ class MainWindow : public QMainWindow {
  protected:
   void paintEvent(QPaintEvent* event) override;
   void showEvent(QShowEvent* event) override;
+ protected:
+  void resizeEvent(QResizeEvent* event) override;
+
  private:
+  void applyResponsiveLayout(int width);
+
+  QWidget* sidebar_{nullptr};
+  QWidget* brandRow_{nullptr};
   void selectPage(int index);
   void refreshDevicesUi();
   void refreshConnectionUi();

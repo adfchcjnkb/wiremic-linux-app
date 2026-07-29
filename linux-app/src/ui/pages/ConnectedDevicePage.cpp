@@ -1,3 +1,4 @@
+#include <QScrollArea>
 #include "ConnectedDevicePage.hpp"
 
 #include <QHBoxLayout>
@@ -14,7 +15,18 @@
 namespace wiremic::ui {
 
 ConnectedDevicePage::ConnectedDevicePage(QWidget* parent) : QWidget(parent) {
-  auto* rootLayout = new QVBoxLayout(this);
+  auto* outerLayout = new QVBoxLayout(this);
+  outerLayout->setContentsMargins(0, 0, 0, 0);
+  auto* scrollArea = new QScrollArea(this);
+  scrollArea->setWidgetResizable(true);
+  scrollArea->setFrameShape(QFrame::NoFrame);
+  scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  scrollArea->setStyleSheet("QScrollArea { background: transparent; }");
+  auto* scrollBody = new QWidget(scrollArea);
+  scrollBody->setStyleSheet("background: transparent;");
+  scrollArea->setWidget(scrollBody);
+  outerLayout->addWidget(scrollArea);
+  auto* rootLayout = new QVBoxLayout(scrollBody);
   rootLayout->setContentsMargins(0, 0, 0, 0);
   rootLayout->setSpacing(20);
 

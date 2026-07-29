@@ -33,6 +33,9 @@ add_library(wiremic_native SHARED
     network/DiscoveryService.cpp
     network/ControlClient.cpp
     audio/AudioSender.cpp
+    audio/AudioCaptureBackend.cpp
+    audio/AAudioCapture.cpp
+    audio/OpenSLESCapture.cpp
     audio/OpusCodec.cpp
     audio/AudioPacketCodec.cpp
     audio/JitterBuffer.cpp
@@ -55,7 +58,7 @@ target_link_libraries(wiremic_native PRIVATE
     opus
     openssl::ssl
     openssl::crypto
-    aaudio
+    OpenSLES
     log
     android
 )

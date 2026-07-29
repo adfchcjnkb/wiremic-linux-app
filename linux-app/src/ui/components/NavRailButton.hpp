@@ -13,6 +13,8 @@ class NavRailButton : public QWidget {
                 QWidget* parent = nullptr);
 
   void setSelected(bool selected);
+  void setCompact(bool compact);
+  [[nodiscard]] bool isCompact() const { return compact_; }
   [[nodiscard]] bool isSelected() const;
 
   qreal selectedProgress() const;
@@ -33,6 +35,7 @@ class NavRailButton : public QWidget {
   QString iconPath_;
   QString label_;
   bool selected_{false};
+  bool compact_{false};
   bool hovered_{false};
   qreal selectedProgress_{0.0};
 };

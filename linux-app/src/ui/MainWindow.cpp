@@ -1,6 +1,7 @@
 #include "MainWindow.hpp"
 #include <algorithm>
 #include <QHBoxLayout>
+#include <QResizeEvent>
 #include <QLabel>
 #include <QPainter>
 #include <QStackedWidget>
@@ -51,20 +52,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   qDebug() << "MainWindow constructor called";
   setWindowTitle("WireMic");
   resize(1120, 720);
-  setMinimumSize(880, 580);
+  setMinimumSize(560, 420);
   auto* central = new QWidget(this);
   setCentralWidget(central);
   auto* rootLayout = new QHBoxLayout(central);
   rootLayout->setContentsMargins(18, 18, 18, 18);
   rootLayout->setSpacing(18);
   auto* sidebar = new GlassPanel(central);
+  sidebar_ = sidebar;
   sidebar->setFillColor(theme::kSidebar);
   sidebar->setCornerRadius(theme::kRadiusXLarge);
   sidebar->setFixedWidth(232);
+  sidebar->setMinimumWidth(64);
   auto* sidebarLayout = new QVBoxLayout(sidebar);
   sidebarLayout->setContentsMargins(6, 24, 6, 20);
   sidebarLayout->setSpacing(4);
   auto* brandRow = new QWidget(sidebar);
+  brandRow_ = brandRow;
   auto* brandLayout = new QHBoxLayout(brandRow);
   brandLayout->setContentsMargins(16, 0, 16, 20);
   brandLayout->setSpacing(10);
@@ -265,4 +269,26 @@ void MainWindow::showEvent(QShowEvent* event) {
   qDebug() << "MainWindow showEvent called";
   QMainWindow::showEvent(event);
 }
+
+void MainWindow::resizeEvent(QResizeEvent* event) {
+  QMainWindow::resizeEvent(event);
+  applyResponsiveLayout(width());
+}
+
+void MainWindow::applyResponsiveLayout(int width) {
+  if (!sidebar_) return;
+
+  // Below this the sidebar labels crowd out the content, so the rail collapses
+  // to icons; the pages themselves scroll, so nothing becomes unreachable.
+  constexpr int kCompactBelow = 820;
+  const bool compact = width < kCompactBelow;
+
+  sidebar_->setFixedWidth(compact ? 68 : 232);
+  if (brandRow_) brandRow_->setVisible(!compact);
+
+  for (auto* button : navButtons_) {
+    if (button) button->setCompact(compact);
+  }
+}
+
 }

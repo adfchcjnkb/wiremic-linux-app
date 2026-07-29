@@ -14,6 +14,14 @@ NavRailButton::NavRailButton(const QString& iconPath, const QString& label, QWid
     setAttribute(Qt::WA_TranslucentBackground, true);
 }
 QSize NavRailButton::sizeHint() const { return QSize(200, 44); }
+void NavRailButton::setCompact(bool compact) {
+  if (compact_ == compact) return;
+  compact_ = compact;
+  setToolTip(compact ? label_ : QString());
+  updateGeometry();
+  update();
+}
+
 void NavRailButton::setSelected(bool selected) {
     if (selected_ == selected) return;
     selected_ = selected;
@@ -71,6 +79,8 @@ void NavRailButton::paintEvent(QPaintEvent*) {
     textColor.setAlphaF(iconOpacity);
     painter.setPen(textColor);
     QRectF textRect(pillRect.left() + 44, 0, pillRect.width() - 44, height());
-    painter.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, label_);
+    if (!compact_) {
+      painter.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, label_);
+    }
 }
 }

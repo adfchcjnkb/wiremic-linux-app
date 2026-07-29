@@ -4,8 +4,10 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import android.support.v4.media.session.MediaSessionCompat
@@ -49,8 +51,34 @@ class StreamingForegroundService : Service() {
                 .build()
         )
 
-        startForeground(NOTIFICATION_ID, buildNotification(deviceName))
+        if (!startForegroundCompat(deviceName)) {
+            // Android 12 and later can refuse a foreground start outright, and
+            // Android 14 rejects a microphone service whose permission was
+            // revoked. Stopping cleanly beats being killed by the system.
+            NativeBridge.nativeDisconnect()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
+    }
+
+    private fun startForegroundCompat(deviceName: String): Boolean {
+        return try {
+            val notification = buildNotification(deviceName)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "could not start the streaming notification", t)
+            false
+        }
     }
 
     private fun handleStopAction() {
@@ -60,7 +88,7 @@ class StreamingForegroundService : Service() {
                 .setState(PlaybackStateCompat.STATE_STOPPED, 0, 0f)
                 .build()
         )
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopForegroundCompat()
         stopSelf()
     }
 
@@ -69,6 +97,15 @@ class StreamingForegroundService : Service() {
         mediaSession?.release()
         mediaSession = null
         super.onDestroy()
+    }
+
+    private fun stopForegroundCompat() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
     }
 
     override fun onBind(intent: Intent?) = null
@@ -107,6 +144,7 @@ class StreamingForegroundService : Service() {
     }
 
     companion object {
+        private const val TAG = "WireMicService"
         const val EXTRA_DEVICE_NAME = "device_name"
         const val ACTION_STOP_STREAMING = "com.wiremic.app.action.STOP_STREAMING"
         private const val NOTIFICATION_ID = 4201
