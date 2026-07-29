@@ -205,8 +205,8 @@ if(WIN32)
     # OpenSSL were previously left behind and the installed app died at
     # startup on a machine without them.
     install(TARGETS wiremic
-            RUNTIME DESTINATION .
-            RUNTIME_DEPENDENCY_SET wiremic_runtime_deps)
+            RUNTIME_DEPENDENCY_SET wiremic_runtime_deps
+            RUNTIME DESTINATION .)
     install(RUNTIME_DEPENDENCY_SET wiremic_runtime_deps
             PRE_EXCLUDE_REGEXES
                 "api-ms-win-.*" "ext-ms-.*" "hvsifiletrust" "pdmutilities"
