@@ -202,12 +202,41 @@ target_compile_features(wiremic PUBLIC cxx_std_20)
 if(WIN32)
     # Resolve every non-system DLL the executable actually pulls in, rather
     # than naming them by hand. windeployqt only knows about Qt, so opus and
-    # OpenSSL were previously left behind and the installed app died at
-    # startup on a machine without them.
+    # OpenSSL would otherwise be left behind.
+    #
+    # The resolver does not search PATH or vcpkg on its own: it looks beside
+    # the binary and in DIRECTORIES only. Without these it silently resolves
+    # nothing and the package ships incomplete, which is exactly what happened.
+    set(WIREMIC_DEP_DIRS "")
+    if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+        list(APPEND WIREMIC_DEP_DIRS
+             "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+    endif()
+
+    # Also derive the location from the imported targets themselves, so this
+    # keeps working if the dependencies ever come from somewhere other than
+    # vcpkg. Import libraries live in lib/ while the DLLs sit in bin/.
+    foreach(dep Opus::opus OpenSSL::Crypto OpenSSL::SSL)
+        if(TARGET ${dep})
+            foreach(prop IMPORTED_LOCATION_RELEASE IMPORTED_LOCATION
+                         IMPORTED_IMPLIB_RELEASE IMPORTED_IMPLIB)
+                get_target_property(dep_path ${dep} ${prop})
+                if(dep_path)
+                    get_filename_component(dep_dir "${dep_path}" DIRECTORY)
+                    get_filename_component(dep_root "${dep_dir}" DIRECTORY)
+                    list(APPEND WIREMIC_DEP_DIRS "${dep_dir}" "${dep_root}/bin")
+                endif()
+            endforeach()
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES WIREMIC_DEP_DIRS)
+    message(STATUS "Runtime dependency search path: ${WIREMIC_DEP_DIRS}")
+
     install(TARGETS wiremic
             RUNTIME_DEPENDENCY_SET wiremic_runtime_deps
             RUNTIME DESTINATION .)
     install(RUNTIME_DEPENDENCY_SET wiremic_runtime_deps
+            DIRECTORIES ${WIREMIC_DEP_DIRS}
             PRE_EXCLUDE_REGEXES
                 "api-ms-win-.*" "ext-ms-.*" "hvsifiletrust" "pdmutilities"
             POST_EXCLUDE_REGEXES

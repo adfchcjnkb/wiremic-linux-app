@@ -130,43 +130,78 @@ jobs:
           & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations --no-system-d3d-compiler dist/app/wiremic.exe
           Get-ChildItem dist/app -Filter *.dll | Select-Object -ExpandProperty Name
 
-      - name: Verify no dependency is missing
+      - name: Resolve and verify runtime dependencies
         shell: pwsh
         run: |
-          # Walk the import table of the exe and of every DLL we shipped. Any
-          # import that is neither present in the package nor a Windows system
-          # DLL would become a "cannot proceed because X.dll was not found"
-          # dialog on a clean machine, so fail the build here instead.
+          # Read the import table of the exe and of every DLL shipped. Anything
+          # that is neither in the package nor a Windows system DLL would become
+          # a "cannot proceed because X.dll was not found" dialog on a clean
+          # machine. Copy what we can find from the dependency prefixes, and
+          # only fail if something genuinely cannot be located anywhere.
           $ErrorActionPreference = "Stop"
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
           $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe |
                      Where-Object { $_.FullName -match "Hostx64\\x64" } | Select-Object -First 1
           if (-not $dumpbin) { throw "dumpbin not found" }
 
-          $shipped = Get-ChildItem -Recurse dist/app -Include *.dll,*.exe |
-                     ForEach-Object { $_.Name.ToLower() }
-          $systemDir = "$env:WINDIR\System32"
-          $missing = @()
+          $searchDirs = @(
+            "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin",
+            "$env:QT_ROOT_DIR\bin"
+          ) | Where-Object { Test-Path $_ }
 
-          foreach ($binary in (Get-ChildItem -Recurse dist/app -Include *.dll,*.exe)) {
-            $imports = & $dumpbin.FullName /dependents $binary.FullName |
-                       Select-String -Pattern "^\s{4}(\S+\.dll)$" |
-                       ForEach-Object { $_.Matches[0].Groups[1].Value }
-            foreach ($import in $imports) {
-              $lower = $import.ToLower()
-              if ($shipped -contains $lower) { continue }
-              if (Test-Path (Join-Path $systemDir $import)) { continue }
-              if ($lower -like "api-ms-*" -or $lower -like "ext-ms-*") { continue }
-              $missing += "$($binary.Name) -> $import"
+          $systemDir = "$env:WINDIR\System32"
+
+          function Get-Imports($path) {
+            & $dumpbin.FullName /dependents $path |
+              Select-String -Pattern "^\s{4}(\S+\.dll)$" |
+              ForEach-Object { $_.Matches[0].Groups[1].Value }
+          }
+
+          # Repeat: a copied DLL brings its own imports with it.
+          for ($pass = 1; $pass -le 6; $pass++) {
+            $shipped = @{}
+            Get-ChildItem -Recurse dist/app -Include *.dll,*.exe |
+              ForEach-Object { $shipped[$_.Name.ToLower()] = $true }
+
+            $copied = 0
+            $missing = @()
+
+            foreach ($binary in (Get-ChildItem -Recurse dist/app -Include *.dll,*.exe)) {
+              foreach ($import in (Get-Imports $binary.FullName)) {
+                $lower = $import.ToLower()
+                if ($shipped.ContainsKey($lower)) { continue }
+                if ($lower -like "api-ms-*" -or $lower -like "ext-ms-*") { continue }
+                if (Test-Path (Join-Path $systemDir $import)) { continue }
+
+                $found = $null
+                foreach ($dir in $searchDirs) {
+                  $candidate = Join-Path $dir $import
+                  if (Test-Path $candidate) { $found = $candidate; break }
+                }
+
+                if ($found) {
+                  Copy-Item $found dist/app/ -Force
+                  Write-Host "  added $import"
+                  $shipped[$lower] = $true
+                  $copied++
+                } else {
+                  $missing += "$($binary.Name) -> $import"
+                }
+              }
+            }
+
+            if ($copied -eq 0) {
+              if ($missing.Count -gt 0) {
+                Write-Host "::error::Runtime dependencies that could not be located:"
+                $missing | Sort-Object -Unique | ForEach-Object { Write-Host "  $_" }
+                exit 1
+              }
+              Write-Host "All runtime dependencies resolve."
+              break
             }
           }
 
-          if ($missing.Count -gt 0) {
-            Write-Host "::error::Missing runtime dependencies:"
-            $missing | Sort-Object -Unique | ForEach-Object { Write-Host "  $_" }
-            exit 1
-          }
-          Write-Host "All runtime dependencies resolve."
+          Get-ChildItem dist/app -Filter *.dll | Select-Object -ExpandProperty Name
 
       - name: Fetch VB-CABLE for bundling
         shell: pwsh
