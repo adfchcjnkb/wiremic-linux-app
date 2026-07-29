@@ -99,7 +99,6 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
       "Lower delay uses smaller audio chunks; needs a stable connection",
       &latencyCombo_));
 
-  latencyCombo_->addItem("Ultra Low (5 ms)");
   latencyCombo_->addItem("Low (10 ms)");
   latencyCombo_->addItem("Balanced (20 ms)");
   latencyCombo_->setCurrentIndex(0);

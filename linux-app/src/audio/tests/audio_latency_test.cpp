@@ -4,6 +4,7 @@
 #include <QTimer>
 
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -58,7 +59,8 @@ int main(int argc, char** argv) {
 
   constexpr uint32_t sampleRate = 48000;
   constexpr int channels = 1;
-  constexpr uint8_t frameSizeMs = 10;
+  const uint8_t frameSizeMs =
+      argc > 1 ? static_cast<uint8_t>(std::atoi(argv[1])) : 10;
   const int frameSamples = static_cast<int>(sampleRate) * frameSizeMs / 1000;
 
   AudioReceiver receiver(key, sampleRate, channels, frameSizeMs, 0);

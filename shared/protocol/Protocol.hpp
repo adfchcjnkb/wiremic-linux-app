@@ -53,7 +53,7 @@ enum class RejectReason : uint8_t {
 
 enum class AudioCodec : uint8_t { Opus, PcmFallback };
 
-enum class LatencyMode : uint8_t { UltraLow5Ms, Low10Ms, Balanced20Ms };
+enum class LatencyMode : uint8_t { Low10Ms, Balanced20Ms };
 
 struct DeviceInfo {
   std::string id;

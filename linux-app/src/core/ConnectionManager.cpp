@@ -264,9 +264,6 @@ protocol::AudioSession ConnectionManager::negotiateSession(
       std::min(settings_.audioBitrateKbps, remoteCapabilities.maxBitrateKbps);
 
   switch (settings_.latencyMode) {
-    case protocol::LatencyMode::UltraLow5Ms:
-      session.frameSizeMs = 5;
-      break;
     case protocol::LatencyMode::Low10Ms:
       session.frameSizeMs = 10;
       break;

@@ -103,9 +103,14 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     autoConnect_ = stored.value(QStringLiteral("autoConnect"), false).toBool();
     rememberTrustedDevices_ =
         stored.value(QStringLiteral("rememberTrustedDevices"), true).toBool();
-    latencyModeIndex_ =
-        stored.value(QStringLiteral("latencyModeIndex"), 0).toInt();
-    if (latencyModeIndex_ < 0 || latencyModeIndex_ > 2) latencyModeIndex_ = 0;
+    if (stored.contains(QStringLiteral("latencyModeIndexV2"))) {
+      latencyModeIndex_ =
+          stored.value(QStringLiteral("latencyModeIndexV2"), 0).toInt();
+    } else {
+      latencyModeIndex_ =
+          stored.value(QStringLiteral("latencyModeIndex"), 1).toInt() - 1;
+    }
+    if (latencyModeIndex_ < 0 || latencyModeIndex_ > 1) latencyModeIndex_ = 0;
 
     core::ConnectionManagerSettings settings;
     settings.autoConnect = autoConnect_;
@@ -300,7 +305,7 @@ void AppController::setRememberTrustedDevices(bool value) {
 int AppController::latencyModeIndex() const { return latencyModeIndex_; }
 
 void AppController::setLatencyModeIndex(int index) {
-  if (index < 0 || index > 2 || latencyModeIndex_ == index) return;
+  if (index < 0 || index > 1 || latencyModeIndex_ == index) return;
   latencyModeIndex_ = index;
   applySettings();
   emit settingsChanged();
@@ -322,7 +327,7 @@ void AppController::applySettings() {
   stored.setValue(QStringLiteral("autoConnect"), autoConnect_);
   stored.setValue(QStringLiteral("rememberTrustedDevices"),
                    rememberTrustedDevices_);
-  stored.setValue(QStringLiteral("latencyModeIndex"), latencyModeIndex_);
+  stored.setValue(QStringLiteral("latencyModeIndexV2"), latencyModeIndex_);
 }
 
 bool AppController::virtualMicActive() const {
