@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "AudioPacketCodec.hpp"
+#include "MonoResampler.hpp"
 #include "OpusCodec.hpp"
 #include "Protocol.hpp"
 
@@ -37,8 +38,10 @@ class AudioSender {
   static void OnStreamError(AAudioStream* stream, void* userdata,
                              aaudio_result_t error);
 
-  aaudio_data_callback_result_t handleAudioData(const int16_t* frames,
+  aaudio_data_callback_result_t handleAudioData(const void* frames,
                                                  int32_t numFrames);
+
+  void appendConverted(const void* frames, int32_t numFrames);
 
   bool openUdpSocket(const std::string& host, uint16_t port);
 
@@ -52,6 +55,12 @@ class AudioSender {
   uint32_t sampleRate_{48000};
   uint8_t channels_{1};
   int frameSamples_{480};
+
+  int32_t streamSampleRate_{0};
+  int32_t streamChannels_{0};
+  aaudio_format_t streamFormat_{AAUDIO_FORMAT_PCM_I16};
+  audio::MonoResampler resampler_;
+  std::vector<int16_t> monoScratch_;
 
   std::vector<int16_t> pending_;
   bool encodeErrorReported_{false};

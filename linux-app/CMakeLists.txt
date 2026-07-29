@@ -247,6 +247,16 @@ if(WIREMIC_BUILD_TESTS)
     wiremic_add_test(audio_latency
         src/audio/tests/audio_latency_test.cpp
         wiremic_audio Qt6::Core Qt6::Network)
+    wiremic_add_test(audio_fidelity
+        src/audio/tests/audio_fidelity_test.cpp
+        wiremic_audio)
+
+    add_executable(wiremic_mono_resampler_test
+        src/audio/tests/mono_resampler_test.cpp)
+    target_include_directories(wiremic_mono_resampler_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../android-app/app/src/main/cpp/audio)
+    target_link_libraries(wiremic_mono_resampler_test PRIVATE wiremic_testing)
+    add_test(NAME mono_resampler COMMAND wiremic_mono_resampler_test)
 
     wiremic_add_test(control_channel_loopback
         src/network/tests/control_channel_loopback_test.cpp

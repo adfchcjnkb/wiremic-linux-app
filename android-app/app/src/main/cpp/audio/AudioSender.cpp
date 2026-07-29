@@ -104,9 +104,51 @@ bool AudioSender::start(const protocol::AudioSession& session,
     return false;
   }
 
+  streamSampleRate_ = AAudioStream_getSampleRate(stream_);
+  streamChannels_ = AAudioStream_getChannelCount(stream_);
+  streamFormat_ = AAudioStream_getFormat(stream_);
+
+  if (streamSampleRate_ <= 0) streamSampleRate_ = static_cast<int32_t>(sampleRate_);
+  if (streamChannels_ <= 0) streamChannels_ = channels_;
+
+  resampler_.Reset(streamSampleRate_, static_cast<int32_t>(sampleRate_));
+
+  if (streamFormat_ != AAUDIO_FORMAT_PCM_I16 &&
+      streamFormat_ != AAUDIO_FORMAT_PCM_FLOAT) {
+    if (errorCallback_) {
+      errorCallback_("microphone returned an unsupported sample format");
+    }
+    AAudioStream_close(stream_);
+    stream_ = nullptr;
+    close(socketFd_);
+    socketFd_ = -1;
+    return false;
+  }
+
+  if (streamSampleRate_ != static_cast<int32_t>(sampleRate_) ||
+      streamChannels_ != channels_ ||
+      streamFormat_ != AAUDIO_FORMAT_PCM_I16) {
+    if (errorCallback_) {
+      errorCallback_("microphone opened at " + std::to_string(streamSampleRate_) +
+                      " Hz / " + std::to_string(streamChannels_) +
+                      " ch; converting to " + std::to_string(sampleRate_) +
+                      " Hz / " + std::to_string(channels_) + " ch");
+    }
+  }
+
   const int32_t framesPerBurst = AAudioStream_getFramesPerBurst(stream_);
+  const int32_t callbackFrames =
+      static_cast<int32_t>(static_cast<int64_t>(frameSamples_) *
+                            streamSampleRate_ / static_cast<int32_t>(sampleRate_));
+  int32_t desiredBuffer = callbackFrames * 2;
   if (framesPerBurst > 0) {
-    AAudioStream_setBufferSizeInFrames(stream_, framesPerBurst * 2);
+    const int32_t burstFloor = framesPerBurst * 2;
+    if (desiredBuffer < burstFloor) desiredBuffer = burstFloor;
+    const int32_t remainder = desiredBuffer % framesPerBurst;
+    if (remainder != 0) desiredBuffer += framesPerBurst - remainder;
+  }
+  if (desiredBuffer > 0) {
+    AAudioStream_setBufferSizeInFrames(stream_, desiredBuffer);
   }
 
   if (AAudioStream_requestStart(stream_) != AAUDIO_OK) {
@@ -133,6 +175,9 @@ void AudioSender::stop() {
     socketFd_ = -1;
   }
   pending_.clear();
+  monoScratch_.clear();
+  streamSampleRate_ = 0;
+  streamChannels_ = 0;
   running_ = false;
 }
 
@@ -141,7 +186,7 @@ aaudio_data_callback_result_t AudioSender::OnAudioData(AAudioStream* ,
                                                          void* audioData,
                                                          int32_t numFrames) {
   auto* self = static_cast<AudioSender*>(userdata);
-  return self->handleAudioData(static_cast<const int16_t*>(audioData), numFrames);
+  return self->handleAudioData(audioData, numFrames);
 }
 
 void AudioSender::OnStreamError(AAudioStream* , void* userdata,
@@ -154,8 +199,39 @@ void AudioSender::OnStreamError(AAudioStream* , void* userdata,
   self->running_ = false;
 }
 
+void AudioSender::appendConverted(const void* frames, int32_t numFrames) {
+  const size_t inFrames = static_cast<size_t>(numFrames);
+  const size_t inChannels = static_cast<size_t>(streamChannels_);
+  if (inChannels == 0) return;
+
+  monoScratch_.clear();
+  monoScratch_.reserve(inFrames);
+
+  if (streamFormat_ == AAUDIO_FORMAT_PCM_FLOAT) {
+    const auto* src = static_cast<const float*>(frames);
+    for (size_t f = 0; f < inFrames; ++f) {
+      double sum = 0.0;
+      for (size_t c = 0; c < inChannels; ++c) sum += src[f * inChannels + c];
+      double value = (sum / static_cast<double>(inChannels)) * 32767.0;
+      if (value > 32767.0) value = 32767.0;
+      if (value < -32768.0) value = -32768.0;
+      monoScratch_.push_back(static_cast<int16_t>(value));
+    }
+  } else {
+    const auto* src = static_cast<const int16_t*>(frames);
+    for (size_t f = 0; f < inFrames; ++f) {
+      int32_t sum = 0;
+      for (size_t c = 0; c < inChannels; ++c) sum += src[f * inChannels + c];
+      monoScratch_.push_back(
+          static_cast<int16_t>(sum / static_cast<int32_t>(inChannels)));
+    }
+  }
+
+  resampler_.Process(monoScratch_.data(), monoScratch_.size(), pending_);
+}
+
 aaudio_data_callback_result_t AudioSender::handleAudioData(
-    const int16_t* frames, int32_t numFrames) {
+    const void* frames, int32_t numFrames) {
   if (!running_ || socketFd_ < 0 || !encoder_) {
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
   }
@@ -167,8 +243,7 @@ aaudio_data_callback_result_t AudioSender::handleAudioData(
   const size_t chunk = static_cast<size_t>(frameSamples_) * channels_;
   if (chunk == 0) return AAUDIO_CALLBACK_RESULT_CONTINUE;
 
-  pending_.insert(pending_.end(), frames,
-                   frames + static_cast<size_t>(numFrames) * channels_);
+  appendConverted(frames, numFrames);
 
   const size_t maxPending = chunk * 3;
   if (pending_.size() > maxPending) {

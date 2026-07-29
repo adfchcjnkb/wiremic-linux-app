@@ -15,7 +15,17 @@
 namespace wiremic::platform {
 
 namespace {
-constexpr uint32_t kTargetBufferFrames = 3;
+constexpr uint32_t kTargetBufferMs = 40;
+constexpr uint32_t kMinTargetBufferFrames = 3;
+constexpr uint32_t kQueueBufferMs = 40;
+constexpr size_t kMinQueuedFrames = 4;
+
+uint32_t BufferFramesFor(uint32_t windowMs, uint8_t frameSizeMs,
+                         uint32_t minimumFrames) {
+    const uint32_t safeFrameMs = frameSizeMs > 0 ? frameSizeMs : 10;
+    const uint32_t byWindow = (windowMs + safeFrameMs - 1) / safeFrameMs;
+    return std::max(minimumFrames, byWindow);
+}
 }
 
 PulseAudioVirtualMic::PulseAudioVirtualMic(const VirtualMicConfig& config)
@@ -246,8 +256,11 @@ bool PulseAudioVirtualMic::start() {
         std::max<uint32_t>(1, config_.sampleRate * config_.frameSizeMs / 1000);
 
     pa_buffer_attr attr{};
-    attr.maxlength = frameBytes * kTargetBufferFrames * 3;
-    attr.tlength = frameBytes * kTargetBufferFrames;
+    const uint32_t targetFrames = BufferFramesFor(
+        kTargetBufferMs, config_.frameSizeMs, kMinTargetBufferFrames);
+
+    attr.maxlength = frameBytes * targetFrames * 3;
+    attr.tlength = frameBytes * targetFrames;
     attr.prebuf = 0;
     attr.minreq = frameBytes;
     attr.fragsize = static_cast<uint32_t>(-1);
@@ -326,11 +339,13 @@ void PulseAudioVirtualMic::pushSamples(const int16_t* interleaved,
         return;
     }
 
-    constexpr size_t kMaxQueuedFrames = 4;
+    const size_t maxQueuedFrames = BufferFramesFor(
+        kQueueBufferMs, config_.frameSizeMs,
+        static_cast<uint32_t>(kMinQueuedFrames));
 
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
-        while (queue_.size() >= kMaxQueuedFrames) queue_.pop_front();
+        while (queue_.size() >= maxQueuedFrames) queue_.pop_front();
         queue_.emplace_back(interleaved, interleaved + sampleCount);
     }
     queueSignal_.notify_one();
