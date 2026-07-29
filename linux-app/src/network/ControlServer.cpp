@@ -4,7 +4,7 @@
 
 #include <QCryptographicHash>
 
-#include <unistd.h>
+#include "SocketCompat.hpp"
 
 #include <vector>
 
@@ -34,7 +34,7 @@ void ControlTcpServer::incomingConnection(qintptr handle) {
   if (!socket->setSocketDescriptor(handle)) {
     emit connectionSetupFailed(socket->errorString());
     delete socket;
-    ::close(static_cast<int>(handle));
+    platform::CloseSocket(static_cast<platform::socket_t>(handle));
     return;
   }
   emit newSslConnection(socket);

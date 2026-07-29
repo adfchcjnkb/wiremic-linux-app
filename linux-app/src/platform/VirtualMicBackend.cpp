@@ -1,12 +1,31 @@
 #include "VirtualMicBackend.hpp"
 
+#ifdef _WIN32
+#include "WindowsVirtualMic.hpp"
+#else
 #include "PulseAudioVirtualMic.hpp"
 #include "PipeWireVirtualMic.hpp"
+#endif
 
 namespace wiremic::platform {
 
+const char* AudioServerDisplayName(AudioServerKind kind) {
+  switch (kind) {
+    case AudioServerKind::PipeWire:
+      return "PipeWire";
+    case AudioServerKind::PulseAudio:
+      return "PulseAudio";
+    case AudioServerKind::WindowsCable:
+      return "VB-CABLE";
+    case AudioServerKind::None:
+      break;
+  }
+  return "none";
+}
+
 namespace {
 
+#ifndef _WIN32
 class PipeWireBackend final : public VirtualMicBackend {
  public:
   explicit PipeWireBackend(const VirtualMicConfig& config) : impl_(config) {}
@@ -34,6 +53,21 @@ class PulseAudioBackend final : public VirtualMicBackend {
  private:
   PulseAudioVirtualMic impl_;
 };
+#else
+class WindowsCableBackend final : public VirtualMicBackend {
+ public:
+  explicit WindowsCableBackend(const VirtualMicConfig& config) : impl_(config) {}
+  bool start() override { return impl_.start(); }
+  void stop() override { return impl_.stop(); }
+  [[nodiscard]] bool isRunning() const override { return impl_.isRunning(); }
+  void pushSamples(const int16_t* interleaved, size_t sampleCount) override {
+    impl_.pushSamples(interleaved, sampleCount);
+  }
+
+ private:
+  WindowsVirtualMic impl_;
+};
+#endif
 
 class CompositeBackend final : public VirtualMicBackend {
  public:
@@ -77,6 +111,11 @@ class CompositeBackend final : public VirtualMicBackend {
 std::vector<AudioServerKind> DetectAllAudioServers() {
   std::vector<AudioServerKind> kinds;
 
+#ifdef _WIN32
+  if (WindowsVirtualMic::IsCableInstalled()) {
+    kinds.push_back(AudioServerKind::WindowsCable);
+  }
+#else
   const auto flavour = PulseAudioVirtualMic::QueryServerFlavour();
 
   if (flavour == PulseAudioVirtualMic::ServerFlavour::PulseAudio) {
@@ -92,6 +131,7 @@ std::vector<AudioServerKind> DetectAllAudioServers() {
        PulseAudioVirtualMic::IsPulseAudioAvailable())) {
     kinds.push_back(AudioServerKind::PulseAudio);
   }
+#endif
 
   return kinds;
 }
@@ -112,7 +152,7 @@ std::unique_ptr<VirtualMicBackend> CreateVirtualMicOnAllServers(
     if (!backend) continue;
     composite->add(std::move(backend));
     if (!names.empty()) names += " + ";
-    names += kind == AudioServerKind::PipeWire ? "PipeWire" : "PulseAudio";
+    names += AudioServerDisplayName(kind);
   }
 
   if (composite->empty()) {
@@ -136,10 +176,20 @@ std::unique_ptr<VirtualMicBackend> CreateVirtualMic(
                          : preferredKind;
 
   switch (kind) {
+#ifdef _WIN32
+    case AudioServerKind::WindowsCable:
+      return std::make_unique<WindowsCableBackend>(config);
+    case AudioServerKind::PipeWire:
+    case AudioServerKind::PulseAudio:
+      return nullptr;
+#else
     case AudioServerKind::PipeWire:
       return std::make_unique<PipeWireBackend>(config);
     case AudioServerKind::PulseAudio:
       return std::make_unique<PulseAudioBackend>(config);
+    case AudioServerKind::WindowsCable:
+      return nullptr;
+#endif
     case AudioServerKind::None:
       return nullptr;
   }

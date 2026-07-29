@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=WireMic
+GenericName=Wireless Microphone
+Comment=Use your phone as a microphone over the local network
+Exec=wiremic
+Icon=wiremic
+Categories=AudioVideo;Audio;
+Terminal=false
+StartupNotify=true

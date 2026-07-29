@@ -4,10 +4,7 @@
 #include <QNetworkInterface>
 #include <QTimer>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "SocketCompat.hpp"
 
 #include <cerrno>
 #include <cstring>
@@ -71,8 +68,8 @@ void DiscoveryService::refreshMulticastMemberships() {
   if (current == joinedGroups_) return;
   joinedGroups_ = current;
 
-  const int fd = static_cast<int>(socket_.socketDescriptor());
-  if (fd < 0) return;
+  const auto fd = static_cast<platform::socket_t>(socket_.socketDescriptor());
+  if (fd == platform::kInvalidSocket) return;
 
   const QHostAddress group(
       QString::fromLatin1(protocol::kDiscoveryMulticastGroup));
@@ -82,7 +79,8 @@ void DiscoveryService::refreshMulticastMemberships() {
     request.imr_multiaddr.s_addr = htonl(group.toIPv4Address());
     request.imr_interface.s_addr = htonl(lan.address.toIPv4Address());
 
-    ::setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &request, sizeof(request));
+    ::setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                 platform::AsOptionValue(&request), sizeof(request));
   }
 }
 
@@ -104,25 +102,32 @@ DiscoveryService::~DiscoveryService() { stop(); }
 bool DiscoveryService::bindSocket() {
   if (socket_.state() != QAbstractSocket::UnconnectedState) socket_.close();
 
-  const int fd =
-      ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-  if (fd < 0) {
-    bindError_ = QString::fromLocal8Bit(std::strerror(errno));
+  platform::EnsureSocketsReady();
+
+  const platform::socket_t fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+  if (fd == platform::kInvalidSocket) {
+    bindError_ = QString::fromStdString(
+        platform::SocketErrorText(platform::LastSocketError()));
     bound_ = false;
     return false;
   }
 
   const int enable = 1;
-  ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
-  ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable));
-  ::setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &enable, sizeof(enable));
+  ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
+               platform::AsOptionValue(&enable), sizeof(enable));
+#ifdef SO_REUSEPORT
+  ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT,
+               platform::AsOptionValue(&enable), sizeof(enable));
+#endif
+  ::setsockopt(fd, SOL_SOCKET, SO_BROADCAST,
+               platform::AsOptionValue(&enable), sizeof(enable));
 
   const int multicastTtl = 1;
-  ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &multicastTtl,
-               sizeof(multicastTtl));
+  ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL,
+               platform::AsOptionValue(&multicastTtl), sizeof(multicastTtl));
   const int multicastLoop = 1;
-  ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, &multicastLoop,
-               sizeof(multicastLoop));
+  ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP,
+               platform::AsOptionValue(&multicastLoop), sizeof(multicastLoop));
 
   sockaddr_in address{};
   address.sin_family = AF_INET;
@@ -130,16 +135,17 @@ bool DiscoveryService::bindSocket() {
   address.sin_port = htons(protocol::kDiscoveryBroadcastPort);
 
   if (::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
-    bindError_ = QString::fromLocal8Bit(std::strerror(errno));
-    ::close(fd);
+    bindError_ = QString::fromStdString(
+        platform::SocketErrorText(platform::LastSocketError()));
+    platform::CloseSocket(fd);
     bound_ = false;
     return false;
   }
 
-  if (!socket_.setSocketDescriptor(fd, QAbstractSocket::BoundState,
+  if (!socket_.setSocketDescriptor(static_cast<qintptr>(fd), QAbstractSocket::BoundState,
                                     QIODevice::ReadWrite)) {
     bindError_ = socket_.errorString();
-    ::close(fd);
+    platform::CloseSocket(fd);
     bound_ = false;
     return false;
   }
@@ -239,12 +245,12 @@ bool DiscoveryService::sendToInterface(const QByteArray& bytes,
                                      protocol::kDiscoveryBroadcastPort) >= 0;
   }
 
-  const int fd = static_cast<int>(socket_.socketDescriptor());
-  if (fd >= 0) {
+  const auto fd = static_cast<platform::socket_t>(socket_.socketDescriptor());
+  if (fd != platform::kInvalidSocket) {
     in_addr egress{};
     egress.s_addr = htonl(lan.address.toIPv4Address());
-    if (::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &egress,
-                     sizeof(egress)) == 0) {
+    if (::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF,
+                     platform::AsOptionValue(&egress), sizeof(egress)) == 0) {
       const QHostAddress group(
           QString::fromLatin1(protocol::kDiscoveryMulticastGroup));
       sentAny = socket_.writeDatagram(bytes, group,

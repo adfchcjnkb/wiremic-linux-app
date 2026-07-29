@@ -1,0 +1,35 @@
+# Maintainer: Arvinkheradmand
+pkgname=wiremic
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Use your phone as a microphone over the local network"
+arch=('x86_64')
+url="https://github.com/adfchcjnkb/wiremic-linux-app"
+license=('MIT')
+depends=('qt6-base' 'qt6-svg' 'opus' 'openssl' 'libpipewire' 'libpulse')
+optdepends=('libpulse: pactl, used to publish the microphone on PulseAudio')
+makedepends=('cmake' 'ninja' 'nlohmann-json')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/wiremic-linux-app-$pkgver"
+    cmake -G Ninja -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DWIREMIC_BUILD_TESTS=OFF
+    cmake --build build
+}
+
+check() {
+    cd "$srcdir/wiremic-linux-app-$pkgver"
+    cmake -G Ninja -B build-test \
+        -DCMAKE_BUILD_TYPE=Release -DWIREMIC_BUILD_TESTS=ON
+    cmake --build build-test
+    QT_QPA_PLATFORM=offscreen ctest --test-dir build-test --output-on-failure
+}
+
+package() {
+    cd "$srcdir/wiremic-linux-app-$pkgver"
+    DESTDIR="$pkgdir" cmake --install build
+}

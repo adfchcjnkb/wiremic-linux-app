@@ -357,6 +357,16 @@ bool ConnectionManager::startAudioSend(const protocol::AudioSession& session,
     return false;
   }
 
+#ifdef _WIN32
+  // Sending the desktop microphone to the phone needs a WASAPI capture
+  // backend, which does not exist yet. Receiving -- the direction this
+  // application is actually for -- is unaffected.
+  emit errorOccurred(QStringLiteral(
+      "Sending this computer's microphone is not supported on Windows yet."));
+  audioSender_->stop();
+  audioSender_.reset();
+  return false;
+#else
   platform::AudioCaptureConfig captureConfig;
   captureConfig.sampleRate = session.sampleRate;
   captureConfig.channels = session.channels;
@@ -377,6 +387,8 @@ bool ConnectionManager::startAudioSend(const protocol::AudioSession& session,
         QStringLiteral("Failed to open a local microphone for streaming."));
     return false;
   }
+
+#endif
 
   captureDrainTimer_.start();
   emit audioStateChanged(virtualMicActive(), audioBackendName());
@@ -411,10 +423,12 @@ void ConnectionManager::stopAudio() {
 
   captureDrainTimer_.stop();
 
+#ifndef _WIN32
   if (audioCapture_) {
     audioCapture_->stop();
     audioCapture_.reset();
   }
+#endif
   if (audioSender_) {
     audioSender_->stop();
     audioSender_.reset();

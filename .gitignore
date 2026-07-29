@@ -17,3 +17,7 @@ android-app/local.properties
 *.swp
 *~
 .cache/
+
+# build output
+dist/
+packaging/windows/vbcable/

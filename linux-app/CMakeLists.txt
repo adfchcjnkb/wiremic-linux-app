@@ -6,10 +6,24 @@ find_package(OpenSSL REQUIRED)
 find_package(nlohmann_json 3.11 REQUIRED)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
-pkg_check_modules(SPA REQUIRED IMPORTED_TARGET libspa-0.2)
-pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse-simple libpulse)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
+
+if(WIN32)
+    set(WIREMIC_PLATFORM_SOURCES src/platform/WindowsVirtualMic.cpp)
+    set(WIREMIC_PLATFORM_LIBS ole32 oleaut32 winmm ws2_32 iphlpapi shell32 uuid)
+    set(WIREMIC_PLATFORM_INCLUDES "")
+else()
+    pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
+    pkg_check_modules(SPA REQUIRED IMPORTED_TARGET libspa-0.2)
+    pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse-simple libpulse)
+    set(WIREMIC_PLATFORM_SOURCES
+        src/platform/PipeWireVirtualMic.cpp
+        src/platform/PipeWireAudioCapture.cpp
+        src/platform/AudioDeviceLister.cpp
+        src/platform/PulseAudioVirtualMic.cpp)
+    set(WIREMIC_PLATFORM_LIBS PkgConfig::PIPEWIRE PkgConfig::SPA PkgConfig::PULSE)
+    set(WIREMIC_PLATFORM_INCLUDES ${PIPEWIRE_INCLUDE_DIRS} ${SPA_INCLUDE_DIRS})
+endif()
 
 add_library(wiremic_security STATIC
     src/core/security/CertificateManager.cpp
@@ -37,6 +51,7 @@ add_library(wiremic_network STATIC
 target_include_directories(wiremic_network PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/network
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core/security
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/platform
 )
 
 target_link_libraries(wiremic_network PUBLIC
@@ -49,24 +64,18 @@ target_link_libraries(wiremic_network PUBLIC
 target_compile_features(wiremic_network PUBLIC cxx_std_20)
 
 add_library(wiremic_platform STATIC
-    src/platform/PipeWireVirtualMic.cpp
-    src/platform/PipeWireAudioCapture.cpp
-    src/platform/AudioDeviceLister.cpp
-    src/platform/PulseAudioVirtualMic.cpp
+    ${WIREMIC_PLATFORM_SOURCES}
     src/platform/VirtualMicBackend.cpp
 )
 
 target_include_directories(wiremic_platform PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
-    ${PIPEWIRE_INCLUDE_DIRS}
-    ${SPA_INCLUDE_DIRS}
+    ${WIREMIC_PLATFORM_INCLUDES}
 )
 
 target_link_libraries(wiremic_platform PUBLIC
     Qt6::Core
-    PkgConfig::PIPEWIRE
-    PkgConfig::SPA
-    PkgConfig::PULSE
+    ${WIREMIC_PLATFORM_LIBS}
 )
 
 target_compile_features(wiremic_platform PUBLIC cxx_std_20)
@@ -82,6 +91,7 @@ add_library(wiremic_audio STATIC
 
 target_include_directories(wiremic_audio PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/audio
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/platform
 )
 
 target_link_libraries(wiremic_audio PUBLIC
@@ -159,8 +169,7 @@ target_include_directories(wiremic PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages
-    ${PIPEWIRE_INCLUDE_DIRS}
-    ${SPA_INCLUDE_DIRS}
+    ${WIREMIC_PLATFORM_INCLUDES}
 )
 
 target_link_libraries(wiremic PRIVATE
@@ -179,7 +188,18 @@ target_link_libraries(wiremic PRIVATE
 target_compile_features(wiremic PUBLIC cxx_std_20)
 
 install(TARGETS wiremic RUNTIME DESTINATION bin)
-install(FILES resources/icons/app_icon.svg DESTINATION share/icons/hicolor/scalable/apps RENAME wiremic.svg)
+install(FILES resources/icons/app_icon.svg
+        DESTINATION share/icons/hicolor/scalable/apps RENAME wiremic.svg)
+
+if(UNIX AND NOT APPLE)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/linux/wiremic.desktop
+            DESTINATION share/applications)
+    foreach(size 16 24 32 48 64 128 256)
+        install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/icons/wiremic-${size}.png
+                DESTINATION share/icons/hicolor/${size}x${size}/apps
+                RENAME wiremic.png)
+    endforeach()
+endif()
 
 if(WIREMIC_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)

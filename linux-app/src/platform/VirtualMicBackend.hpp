@@ -9,7 +9,7 @@
 
 namespace wiremic::platform {
 
-enum class AudioServerKind { None, PipeWire, PulseAudio };
+enum class AudioServerKind { None, PipeWire, PulseAudio, WindowsCable };
 
 class VirtualMicBackend {
  public:
@@ -20,6 +20,7 @@ class VirtualMicBackend {
   virtual void pushSamples(const int16_t* interleaved, size_t sampleCount) = 0;
 };
 
+[[nodiscard]] const char* AudioServerDisplayName(AudioServerKind kind);
 [[nodiscard]] AudioServerKind DetectAudioServer();
 [[nodiscard]] std::vector<AudioServerKind> DetectAllAudioServers();
 [[nodiscard]] std::unique_ptr<VirtualMicBackend> CreateVirtualMic(
