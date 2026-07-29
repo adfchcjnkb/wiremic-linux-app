@@ -42,6 +42,16 @@ std::string ToUtf8(const wchar_t* wide) {
   return out;
 }
 
+std::wstring ToWide(const std::string& text) {
+  if (text.empty()) return {};
+  const int length = ::MultiByteToWideChar(
+      CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
+  std::wstring out(static_cast<size_t>(length), L'\0');
+  ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
+                        static_cast<int>(text.size()), out.data(), length);
+  return out;
+}
+
 std::string FriendlyNameOf(IMMDevice* device) {
   IPropertyStore* store = nullptr;
   if (FAILED(device->OpenPropertyStore(STGM_READ, &store)) || !store) return {};
@@ -171,43 +181,103 @@ std::string WindowsVirtualMic::CableCaptureDeviceName() {
   return name;
 }
 
-bool WindowsVirtualMic::MakeCableDefaultCaptureDevice(std::string* error) {
+std::string WindowsVirtualMic::CurrentDefaultCaptureId() {
   ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+  IMMDeviceEnumerator* enumerator = nullptr;
+  if (FAILED(::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
+                                CLSCTX_ALL, IID_PPV_ARGS(&enumerator))) ||
+      !enumerator) {
+    return {};
+  }
+
+  IMMDevice* device = nullptr;
+  std::string result;
+  if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eCapture, eConsole,
+                                                     &device)) &&
+      device) {
+    LPWSTR id = nullptr;
+    if (SUCCEEDED(device->GetId(&id)) && id) {
+      result = ToUtf8(id);
+      ::CoTaskMemFree(id);
+    }
+    device->Release();
+  }
+
+  enumerator->Release();
+  return result;
+}
+
+bool WindowsVirtualMic::SetDefaultCaptureById(const std::string& endpointId,
+                                               std::string* error) {
+  if (endpointId.empty()) {
+    if (error) *error = "no endpoint id given";
+    return false;
+  }
+
+  ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+  IPolicyConfigVista* policy = nullptr;
+  const HRESULT hr =
+      ::CoCreateInstance(kPolicyConfigClient, nullptr, CLSCTX_ALL,
+                         kPolicyConfigVista,
+                         reinterpret_cast<void**>(&policy));
+  if (FAILED(hr) || !policy) {
+    if (error) *error = "the Windows audio policy service is unavailable";
+    return false;
+  }
+
+  const std::wstring wide = ToWide(endpointId);
+  const bool ok = SUCCEEDED(policy->SetDefaultEndpoint(wide.c_str(), eConsole)) &&
+                  SUCCEEDED(policy->SetDefaultEndpoint(wide.c_str(),
+                                                        eCommunications)) &&
+                  SUCCEEDED(policy->SetDefaultEndpoint(wide.c_str(),
+                                                        eMultimedia));
+  policy->Release();
+
+  if (!ok && error) *error = "Windows refused the default-device change";
+  return ok;
+}
+
+bool WindowsVirtualMic::MakeCableDefaultCaptureDevice(
+    std::string* previousEndpointId, std::string* error) {
+  const std::string previous = CurrentDefaultCaptureId();
 
   std::string name;
   IMMDevice* device =
       FindEndpointContaining(eCapture, kCableCaptureMatch, &name);
   if (!device) {
-    if (error) *error = "VB-CABLE capture endpoint not found";
+    if (error) {
+      *error =
+          "VB-CABLE is not installed, so there is no virtual microphone to "
+          "select";
+    }
     return false;
   }
 
   LPWSTR id = nullptr;
   const bool haveId = SUCCEEDED(device->GetId(&id)) && id != nullptr;
+  std::string cableId;
+  if (haveId) {
+    cableId = ToUtf8(id);
+    ::CoTaskMemFree(id);
+  }
   device->Release();
-  if (!haveId) {
-    if (error) *error = "could not read the endpoint id";
+
+  if (cableId.empty()) {
+    if (error) *error = "could not read the VB-CABLE endpoint id";
     return false;
   }
 
-  IPolicyConfigVista* policy = nullptr;
-  HRESULT hr = ::CoCreateInstance(kPolicyConfigClient, nullptr, CLSCTX_ALL,
-                                   kPolicyConfigVista,
-                                   reinterpret_cast<void**>(&policy));
-  bool ok = false;
-  if (SUCCEEDED(hr) && policy) {
-    ok = SUCCEEDED(policy->SetDefaultEndpoint(id, eConsole)) &&
-         SUCCEEDED(policy->SetDefaultEndpoint(id, eCommunications)) &&
-         SUCCEEDED(policy->SetDefaultEndpoint(id, eMultimedia));
-    policy->Release();
+  if (cableId == previous) {
+    if (previousEndpointId) previousEndpointId->clear();
+    return true;
   }
 
-  if (!ok && error) {
-    *error = "Windows refused the default-device change";
-  }
+  if (!SetDefaultCaptureById(cableId, error)) return false;
 
-  ::CoTaskMemFree(id);
-  return ok;
+  if (previousEndpointId) *previousEndpointId = previous;
+  return true;
 }
 
 void WindowsVirtualMic::OpenSoundControlPanel() {

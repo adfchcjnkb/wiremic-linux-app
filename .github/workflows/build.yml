@@ -123,9 +123,50 @@ jobs:
       - name: Stage application
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist/app | Out-Null
-          Copy-Item build/linux-app/Release/wiremic.exe dist/app/
-          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations dist/app/wiremic.exe
+          # cmake --install pulls in every non-system DLL the exe links against
+          # (opus, OpenSSL, the MSVC runtime); windeployqt then adds Qt's own
+          # libraries and plugins on top.
+          cmake --install build --config Release --prefix dist/app
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations --no-system-d3d-compiler dist/app/wiremic.exe
+          Get-ChildItem dist/app -Filter *.dll | Select-Object -ExpandProperty Name
+
+      - name: Verify no dependency is missing
+        shell: pwsh
+        run: |
+          # Walk the import table of the exe and of every DLL we shipped. Any
+          # import that is neither present in the package nor a Windows system
+          # DLL would become a "cannot proceed because X.dll was not found"
+          # dialog on a clean machine, so fail the build here instead.
+          $ErrorActionPreference = "Stop"
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe |
+                     Where-Object { $_.FullName -match "Hostx64\\x64" } | Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin not found" }
+
+          $shipped = Get-ChildItem -Recurse dist/app -Include *.dll,*.exe |
+                     ForEach-Object { $_.Name.ToLower() }
+          $systemDir = "$env:WINDIR\System32"
+          $missing = @()
+
+          foreach ($binary in (Get-ChildItem -Recurse dist/app -Include *.dll,*.exe)) {
+            $imports = & $dumpbin.FullName /dependents $binary.FullName |
+                       Select-String -Pattern "^\s{4}(\S+\.dll)$" |
+                       ForEach-Object { $_.Matches[0].Groups[1].Value }
+            foreach ($import in $imports) {
+              $lower = $import.ToLower()
+              if ($shipped -contains $lower) { continue }
+              if (Test-Path (Join-Path $systemDir $import)) { continue }
+              if ($lower -like "api-ms-*" -or $lower -like "ext-ms-*") { continue }
+              $missing += "$($binary.Name) -> $import"
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::Missing runtime dependencies:"
+            $missing | Sort-Object -Unique | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+          Write-Host "All runtime dependencies resolve."
 
       - name: Fetch VB-CABLE for bundling
         shell: pwsh

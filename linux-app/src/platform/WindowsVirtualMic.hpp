@@ -36,7 +36,14 @@ class WindowsVirtualMic {
   [[nodiscard]] static bool IsCableInstalled();
   [[nodiscard]] static std::string CableRenderDeviceName();
   [[nodiscard]] static std::string CableCaptureDeviceName();
-  static bool MakeCableDefaultCaptureDevice(std::string* error);
+  [[nodiscard]] static std::string CurrentDefaultCaptureId();
+  static bool SetDefaultCaptureById(const std::string& endpointId,
+                                     std::string* error);
+  // Returns the endpoint that was default beforehand so the caller can put it
+  // back. Leaving the machine stuck on a virtual microphone after WireMic
+  // exits would silently break every other application's audio input.
+  static bool MakeCableDefaultCaptureDevice(std::string* previousEndpointId,
+                                             std::string* error);
   static void OpenSoundControlPanel();
 
  private:

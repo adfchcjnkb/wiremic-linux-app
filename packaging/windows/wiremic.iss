@@ -57,7 +57,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
-Name: "installcable"; Description: "Install the VB-CABLE virtual audio device (required for the virtual microphone)"; GroupDescription: "Virtual microphone:"
+Name: "installcable"; Description: "Install the VB-CABLE virtual audio device (required for the virtual microphone)"; GroupDescription: "Virtual microphone:"; Check: not CableAlreadyInstalled
 
 [Files]
 Source: "..\..\dist\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -128,8 +128,13 @@ var
   Installer: String;
   ResultCode: Integer;
 begin
+  { Re-running the driver installer over a working install can leave the
+    endpoint in a half-configured state, so never touch an existing one. }
   if CableAlreadyInstalled() then
+  begin
+    Log('VB-CABLE already present; leaving it alone.');
     Exit;
+  end;
 
   { VB-CABLE ships separate 32/64-bit setup binaries; -i installs, -h runs it
     without its own UI so our progress page stays in charge. }
@@ -148,9 +153,22 @@ begin
   WizardForm.StatusLabel.Caption := 'Installing the VB-CABLE virtual audio device...';
   if not Exec(Installer, '-i -h', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
-    MsgBox('The VB-CABLE installer could not be started.' + #13#10 +
-           'WireMic will still install, but the virtual microphone will not ' +
-           'appear until VB-CABLE is present.', mbError, MB_OK);
+    MsgBox('The VB-CABLE installer could not be started.' + #13#10 + #13#10 +
+           'WireMic is installed and will work as soon as VB-CABLE is present.' +
+           ' You can install it yourself from https://vb-cable.com -- WireMic ' +
+           'detects it automatically, no reconfiguration needed.',
+           mbError, MB_OK);
+    Exit;
+  end;
+
+  { VB-CABLE returns a non-zero code when it needs a reboot to finish binding
+    the endpoint. That is not a failure, but the user has to know. }
+  if ResultCode <> 0 then
+  begin
+    MsgBox('VB-CABLE was installed but Windows needs a restart before the ' +
+           'virtual microphone appears.' + #13#10 + #13#10 +
+           'Restart when convenient, then open WireMic.',
+           mbInformation, MB_OK);
   end;
 end;
 
@@ -158,7 +176,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
-    if WizardIsTaskSelected('installcable') then
+    if WizardIsTaskSelected('installcable') and not CableAlreadyInstalled() then
       InstallCable();
   end;
 end;

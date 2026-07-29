@@ -199,9 +199,27 @@ endif()
 
 target_compile_features(wiremic PUBLIC cxx_std_20)
 
-install(TARGETS wiremic RUNTIME DESTINATION bin)
-install(FILES resources/icons/app_icon.svg
-        DESTINATION share/icons/hicolor/scalable/apps RENAME wiremic.svg)
+if(WIN32)
+    # Resolve every non-system DLL the executable actually pulls in, rather
+    # than naming them by hand. windeployqt only knows about Qt, so opus and
+    # OpenSSL were previously left behind and the installed app died at
+    # startup on a machine without them.
+    install(TARGETS wiremic
+            RUNTIME DESTINATION .
+            RUNTIME_DEPENDENCY_SET wiremic_runtime_deps)
+    install(RUNTIME_DEPENDENCY_SET wiremic_runtime_deps
+            PRE_EXCLUDE_REGEXES
+                "api-ms-win-.*" "ext-ms-.*" "hvsifiletrust" "pdmutilities"
+            POST_EXCLUDE_REGEXES
+                ".*[Ss]ystem32.*" ".*[Ww]indows[/\\][Ss]ys.*"
+            DESTINATION .)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/icons/wiremic.ico
+            DESTINATION .)
+else()
+    install(TARGETS wiremic RUNTIME DESTINATION bin)
+    install(FILES resources/icons/app_icon.svg
+            DESTINATION share/icons/hicolor/scalable/apps RENAME wiremic.svg)
+endif()
 
 if(UNIX AND NOT APPLE)
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/linux/wiremic.desktop
