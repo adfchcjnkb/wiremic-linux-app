@@ -10,6 +10,7 @@ namespace wiremic::protocol {
 
 inline constexpr uint16_t kProtocolVersion = 1;
 inline constexpr uint16_t kDiscoveryBroadcastPort = 47500;
+inline constexpr const char* kDiscoveryMulticastGroup = "239.255.47.50";
 inline constexpr uint16_t kDefaultControlPort = 47600;
 inline constexpr int kAnnounceIntervalMs = 2000;
 inline constexpr int kOfflineAfterMissedAnnounces = 3;
