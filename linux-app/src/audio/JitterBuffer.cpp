@@ -119,8 +119,13 @@ JitterPopOutcome JitterBuffer::Pop() {
 
   auto it = buffer_.find(nextPlayoutSeq_);
   if (it == buffer_.end()) {
+    JitterPopOutcome outcome{JitterPopResult::Loss, {}, {}};
+    const auto next = buffer_.find(nextPlayoutSeq_ + 1);
+    if (next != buffer_.end() && !next->second.dtx) {
+      outcome.fecPayload = next->second.payload;
+    }
     ++nextPlayoutSeq_;
-    return {JitterPopResult::Loss, {}};
+    return outcome;
   }
 
   Entry entry = std::move(it->second);

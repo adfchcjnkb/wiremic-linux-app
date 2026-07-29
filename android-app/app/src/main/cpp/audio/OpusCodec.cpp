@@ -11,7 +11,7 @@ OpusFrameEncoder::OpusFrameEncoder(uint32_t sampleRate, int channels,
   int error = 0;
   encoder_ = opus_encoder_create(static_cast<opus_int32>(sampleRate),
                                   channels,
-                                  OPUS_APPLICATION_RESTRICTED_LOWDELAY,
+                                  OPUS_APPLICATION_VOIP,
                                   &error);
   if (error != OPUS_OK || encoder_ == nullptr) {
     throw std::runtime_error("Failed to create Opus encoder");

@@ -12,6 +12,7 @@ enum class JitterPopResult { NotReady, Loss, Silence, Ready };
 struct JitterPopOutcome {
   JitterPopResult result{JitterPopResult::NotReady};
   std::vector<uint8_t> payload;
+  std::vector<uint8_t> fecPayload;
 };
 
 class JitterBuffer {

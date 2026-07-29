@@ -32,6 +32,8 @@ class OpusFrameDecoder {
 
   std::vector<int16_t> Decode(const uint8_t* data, size_t length,
                                int frameSamples);
+  std::vector<int16_t> DecodeWithFec(const uint8_t* nextPacket, size_t length,
+                                      int frameSamples);
   std::vector<int16_t> DecodePacketLoss(int frameSamples);
 
  private:

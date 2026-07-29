@@ -250,6 +250,9 @@ if(WIREMIC_BUILD_TESTS)
     wiremic_add_test(audio_fidelity
         src/audio/tests/audio_fidelity_test.cpp
         wiremic_audio)
+    wiremic_add_test(packet_loss
+        src/audio/tests/packet_loss_test.cpp
+        wiremic_audio)
 
     add_executable(wiremic_mono_resampler_test
         src/audio/tests/mono_resampler_test.cpp)

@@ -145,6 +145,13 @@ bool AudioReceiver::emitOneFrame() {
 
     case JitterPopResult::Loss: {
       try {
+        if (!outcome.fecPayload.empty()) {
+          auto pcm = decoder_->DecodeWithFec(outcome.fecPayload.data(),
+                                              outcome.fecPayload.size(),
+                                              frameSamples_);
+          emit pcmFrameReady(std::move(pcm), true);
+          return true;
+        }
         auto pcm = decoder_->DecodePacketLoss(frameSamples_);
         emit pcmFrameReady(std::move(pcm), true);
       } catch (const std::exception& e) {

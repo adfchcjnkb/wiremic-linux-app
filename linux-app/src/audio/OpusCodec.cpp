@@ -11,7 +11,7 @@ OpusFrameEncoder::OpusFrameEncoder(uint32_t sampleRate, int channels,
   int error = 0;
   encoder_ = opus_encoder_create(static_cast<opus_int32>(sampleRate),
                                   channels,
-                                  OPUS_APPLICATION_RESTRICTED_LOWDELAY,
+                                  OPUS_APPLICATION_VOIP,
                                   &error);
   if (error != OPUS_OK || encoder_ == nullptr) {
     throw std::runtime_error("Failed to create Opus encoder");
@@ -66,6 +66,22 @@ std::vector<int16_t> OpusFrameDecoder::Decode(const uint8_t* data,
                   frameSamples, 0);
   if (decodedSamples < 0) {
     throw std::runtime_error("Opus decode failed");
+  }
+  pcm.resize(static_cast<size_t>(decodedSamples) *
+             static_cast<size_t>(channels_));
+  return pcm;
+}
+
+std::vector<int16_t> OpusFrameDecoder::DecodeWithFec(const uint8_t* nextPacket,
+                                                      size_t length,
+                                                      int frameSamples) {
+  std::vector<int16_t> pcm(static_cast<size_t>(frameSamples) *
+                            static_cast<size_t>(channels_));
+  const int decodedSamples =
+      opus_decode(decoder_, nextPacket, static_cast<opus_int32>(length),
+                  pcm.data(), frameSamples, 1);
+  if (decodedSamples < 0) {
+    throw std::runtime_error("Opus FEC decode failed");
   }
   pcm.resize(static_cast<size_t>(decodedSamples) *
              static_cast<size_t>(channels_));

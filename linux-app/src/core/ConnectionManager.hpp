@@ -28,7 +28,7 @@ namespace wiremic::core {
 struct ConnectionManagerSettings {
   bool autoConnect{false};
   bool rememberTrustedDevices{true};
-  protocol::LatencyMode latencyMode{protocol::LatencyMode::UltraLow5Ms};
+  protocol::LatencyMode latencyMode{protocol::LatencyMode::Low10Ms};
   uint32_t audioBitrateKbps{96};
 };
 
