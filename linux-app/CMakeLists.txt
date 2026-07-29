@@ -5,8 +5,14 @@ find_package(OpenSSL REQUIRED)
 
 find_package(nlohmann_json 3.11 REQUIRED)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
+if(WIN32)
+    find_package(Opus CONFIG REQUIRED)
+    set(WIREMIC_OPUS_TARGET Opus::opus)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
+    set(WIREMIC_OPUS_TARGET PkgConfig::OPUS)
+endif()
 
 if(WIN32)
     set(WIREMIC_PLATFORM_SOURCES src/platform/WindowsVirtualMic.cpp)
@@ -98,7 +104,7 @@ target_link_libraries(wiremic_audio PUBLIC
     Qt6::Core
     Qt6::Network
     OpenSSL::Crypto
-    PkgConfig::OPUS
+    ${WIREMIC_OPUS_TARGET}
 )
 
 target_compile_features(wiremic_audio PUBLIC cxx_std_20)
@@ -184,6 +190,12 @@ target_link_libraries(wiremic PRIVATE
     wiremic_security
     wiremic_network
 )
+
+if(WIN32)
+    set_target_properties(wiremic PROPERTIES WIN32_EXECUTABLE TRUE)
+    target_sources(wiremic PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/windows/wiremic.rc)
+endif()
 
 target_compile_features(wiremic PUBLIC cxx_std_20)
 
