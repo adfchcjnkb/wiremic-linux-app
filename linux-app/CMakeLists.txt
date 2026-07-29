@@ -309,6 +309,8 @@ if(WIREMIC_BUILD_TESTS)
 
     wiremic_add_test(virtual_mic src/platform/tests/virtual_mic_test.cpp
         wiremic_platform)
-    wiremic_add_test(audio_capture src/platform/tests/audio_capture_test.cpp
-        wiremic_platform)
+    if(NOT WIN32)
+        wiremic_add_test(audio_capture src/platform/tests/audio_capture_test.cpp
+            wiremic_platform)
+    endif()
 endif()

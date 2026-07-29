@@ -53,7 +53,7 @@ class DiscoveryService : public QObject {
 
   [[nodiscard]] static std::vector<LanInterface> LanInterfaces();
   void refreshMulticastMemberships();
-  bool sendToInterface(const QByteArray& bytes, const LanInterface& interface);
+  bool sendToInterface(const QByteArray& bytes, const LanInterface& lan);
 
   protocol::DeviceInfo localDevice_;
   QUdpSocket socket_;

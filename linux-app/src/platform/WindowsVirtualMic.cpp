@@ -2,11 +2,19 @@
 
 #include "WindowsVirtualMic.hpp"
 
+#include <windows.h>
+
+#include <initguid.h>
+
+#include <objbase.h>
+#include <propidl.h>
+#include <propkeydef.h>
+#include <propsys.h>
+#include <mmreg.h>
+#include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <functiondiscoverykeys_devpkey.h>
-#include <mmdeviceapi.h>
-#include <objbase.h>
-#include <windows.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <cmath>
@@ -19,6 +27,10 @@ constexpr const char* kCableRenderMatch = "CABLE Input";
 constexpr const char* kCableCaptureMatch = "CABLE Output";
 constexpr uint32_t kTargetBufferMs = 40;
 
+const GUID kSubtypeIeeeFloat = {
+    0x00000003, 0x0000, 0x0010,
+    {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+
 std::string ToUtf8(const wchar_t* wide) {
   if (!wide) return {};
   const int length =
@@ -27,16 +39,6 @@ std::string ToUtf8(const wchar_t* wide) {
   std::string out(static_cast<size_t>(length - 1), '\0');
   ::WideCharToMultiByte(CP_UTF8, 0, wide, -1, out.data(), length, nullptr,
                         nullptr);
-  return out;
-}
-
-std::wstring ToWide(const std::string& text) {
-  if (text.empty()) return {};
-  const int length = ::MultiByteToWideChar(
-      CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
-  std::wstring out(static_cast<size_t>(length), L'\0');
-  ::MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
-                        static_cast<int>(text.size()), out.data(), length);
   return out;
 }
 
@@ -251,7 +253,7 @@ bool WindowsVirtualMic::start() {
   deviceIsFloat_ = mixFormat_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT;
   if (mixFormat_->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
     auto* ext = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(mixFormat_);
-    deviceIsFloat_ = ext->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+    deviceIsFloat_ = IsEqualGUID(ext->SubFormat, kSubtypeIeeeFloat) != 0;
   }
 
   renderEvent_ = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);

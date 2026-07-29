@@ -31,21 +31,21 @@ bool IsTunnelInterface(const QString& name) {
 std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
   std::vector<LanInterface> result;
 
-  for (const auto& interface : QNetworkInterface::allInterfaces()) {
-    const auto flags = interface.flags();
+  for (const auto& iface : QNetworkInterface::allInterfaces()) {
+    const auto flags = iface.flags();
     if (!flags.testFlag(QNetworkInterface::IsUp) ||
         !flags.testFlag(QNetworkInterface::IsRunning) ||
         flags.testFlag(QNetworkInterface::IsLoopBack)) {
       continue;
     }
-    if (IsTunnelInterface(interface.name())) continue;
+    if (IsTunnelInterface(iface.name())) continue;
 
-    for (const auto& entry : interface.addressEntries()) {
+    for (const auto& entry : iface.addressEntries()) {
       if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol) continue;
       if (entry.ip().isLoopback()) continue;
 
       LanInterface lan;
-      lan.name = interface.name();
+      lan.name = iface.name();
       lan.address = entry.ip();
       lan.broadcast = entry.broadcast();
       result.push_back(lan);
