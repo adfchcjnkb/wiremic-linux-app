@@ -38,6 +38,13 @@ bool PipeWireVirtualMic::IsPipeWireAvailable() {
 PipeWireVirtualMic::PipeWireVirtualMic(const VirtualMicConfig& config)
     : config_(config),
       ringBuffer_(kRingBufferFrames * config_.channels, 0) {
+    const size_t frameSamples =
+        static_cast<size_t>(config_.sampleRate) * config_.frameSizeMs / 1000;
+    const size_t quantumSamples =
+        static_cast<size_t>(config_.sampleRate) * 60 / 1000;
+    maxBufferedSamples_ =
+        std::max<size_t>(frameSamples * 4, quantumSamples) * config_.channels;
+
     pw_init(nullptr, nullptr);
 }
 
@@ -55,16 +62,25 @@ void PipeWireVirtualMic::OnStreamStateChanged(void* userdata,
 void PipeWireVirtualMic::fillBuffer(int16_t* dst, uint32_t maxFrames,
                                      uint32_t& outFrames) {
     const size_t channels = config_.channels;
-    const size_t framesAvailable = available_ / channels;
+
+    const uint64_t written = writeCount_.load(std::memory_order_acquire);
+    uint64_t read = readCount_.load(std::memory_order_relaxed);
+
+    if (written - read > maxBufferedSamples_) {
+        read = written - maxBufferedSamples_;
+        read -= read % channels;
+    }
+
+    const size_t framesAvailable = static_cast<size_t>(written - read) / channels;
     const size_t framesToCopy = std::min<size_t>(maxFrames, framesAvailable);
+    const size_t ringSize = ringBuffer_.size();
 
     for (size_t f = 0; f < framesToCopy; ++f) {
         for (size_t c = 0; c < channels; ++c) {
-            dst[f * channels + c] = ringBuffer_[readPos_];
-            readPos_ = (readPos_ + 1) % ringBuffer_.size();
+            dst[f * channels + c] = ringBuffer_[read % ringSize];
+            ++read;
         }
     }
-    available_ -= framesToCopy * channels;
 
     for (size_t f = framesToCopy; f < maxFrames; ++f) {
         for (size_t c = 0; c < channels; ++c) {
@@ -72,6 +88,7 @@ void PipeWireVirtualMic::fillBuffer(int16_t* dst, uint32_t maxFrames,
         }
     }
 
+    readCount_.store(read, std::memory_order_release);
     outFrames = maxFrames;
 }
 
@@ -138,11 +155,13 @@ bool PipeWireVirtualMic::start() {
 
     struct pw_properties* props = pw_properties_new(
         PW_KEY_MEDIA_TYPE, "Audio",
-        PW_KEY_MEDIA_CATEGORY, "Playback",
         PW_KEY_MEDIA_CLASS, "Audio/Source",
         PW_KEY_MEDIA_ROLE, "Communication",
         PW_KEY_NODE_NAME, config_.nodeName.c_str(),
         PW_KEY_NODE_DESCRIPTION, config_.nodeDescription.c_str(),
+        PW_KEY_NODE_NICK, config_.nodeDescription.c_str(),
+        PW_KEY_NODE_VIRTUAL, "true",
+        PW_KEY_NODE_ALWAYS_PROCESS, "true",
         PW_KEY_NODE_LATENCY, latencyHint.c_str(),
         nullptr);
 
@@ -182,8 +201,7 @@ bool PipeWireVirtualMic::start() {
 
     const int connectResult = pw_stream_connect(
         stream_, PW_DIRECTION_OUTPUT, PW_ID_ANY,
-        static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT |
-                                      PW_STREAM_FLAG_MAP_BUFFERS |
+        static_cast<pw_stream_flags>(PW_STREAM_FLAG_MAP_BUFFERS |
                                       PW_STREAM_FLAG_RT_PROCESS),
         params, 1);
 
@@ -225,26 +243,23 @@ void PipeWireVirtualMic::stop() {
         loop_ = nullptr;
     }
     running_ = false;
-    writePos_ = 0;
-    readPos_ = 0;
-    available_ = 0;
+    writeCount_.store(0, std::memory_order_relaxed);
+    readCount_.store(0, std::memory_order_relaxed);
 }
 
 void PipeWireVirtualMic::pushSamples(const int16_t* interleaved,
                                       size_t sampleCount) {
     if (!running_ || !loop_ || interleaved == nullptr || sampleCount == 0) return;
 
-    pw_thread_loop_lock(loop_);
+    const size_t ringSize = ringBuffer_.size();
+    uint64_t write = writeCount_.load(std::memory_order_relaxed);
+
     for (size_t i = 0; i < sampleCount; ++i) {
-        ringBuffer_[writePos_] = interleaved[i];
-        writePos_ = (writePos_ + 1) % ringBuffer_.size();
-        if (available_ < ringBuffer_.size()) {
-            ++available_;
-        } else {
-            readPos_ = (readPos_ + 1) % ringBuffer_.size();
-        }
+        ringBuffer_[write % ringSize] = interleaved[i];
+        ++write;
     }
-    pw_thread_loop_unlock(loop_);
+
+    writeCount_.store(write, std::memory_order_release);
 }
 
 }

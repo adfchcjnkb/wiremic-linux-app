@@ -28,6 +28,8 @@ class JitterBuffer {
   }
   [[nodiscard]] size_t bufferedCount() const { return buffer_.size(); }
 
+  [[nodiscard]] int queuedLeadFrames() const;
+
  private:
   struct Entry {
     std::vector<uint8_t> payload;

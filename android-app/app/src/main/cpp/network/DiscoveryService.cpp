@@ -1,16 +1,82 @@
 #include "DiscoveryService.hpp"
 
 #include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstring>
 
 namespace wiremic::android {
 
 namespace {
 constexpr int kSocketTimeoutMs = 200;
+
+bool IsTunnelInterface(const char* name) {
+  static const char* const kTunnelPrefixes[] = {"tun",  "tap",       "ppp",
+                                                 "ipsec", "nordlynx", "wg",
+                                                 "rmnet_ims", "clat"};
+  for (const char* prefix : kTunnelPrefixes) {
+    if (std::strncmp(name, prefix, std::strlen(prefix)) == 0) return true;
+  }
+  return false;
+}
+}
+
+std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
+  std::vector<LanInterface> result;
+
+  struct ifaddrs* addresses = nullptr;
+  if (getifaddrs(&addresses) != 0 || addresses == nullptr) return result;
+
+  for (struct ifaddrs* it = addresses; it != nullptr; it = it->ifa_next) {
+    if (it->ifa_addr == nullptr || it->ifa_addr->sa_family != AF_INET) continue;
+    if ((it->ifa_flags & IFF_UP) == 0) continue;
+    if ((it->ifa_flags & IFF_RUNNING) == 0) continue;
+    if ((it->ifa_flags & IFF_LOOPBACK) != 0) continue;
+    if (it->ifa_name == nullptr || IsTunnelInterface(it->ifa_name)) continue;
+
+    LanInterface lan;
+    lan.name = it->ifa_name;
+    lan.address =
+        reinterpret_cast<struct sockaddr_in*>(it->ifa_addr)->sin_addr.s_addr;
+
+    if ((it->ifa_flags & IFF_BROADCAST) != 0 && it->ifa_broadaddr != nullptr &&
+        it->ifa_broadaddr->sa_family == AF_INET) {
+      lan.broadcast = reinterpret_cast<struct sockaddr_in*>(it->ifa_broadaddr)
+                          ->sin_addr.s_addr;
+    }
+
+    result.push_back(lan);
+  }
+
+  freeifaddrs(addresses);
+  return result;
+}
+
+void DiscoveryService::refreshMulticastMemberships() {
+  if (socketFd_ < 0) return;
+
+  const auto interfaces = LanInterfaces();
+
+  std::vector<std::string> current;
+  current.reserve(interfaces.size());
+  for (const auto& lan : interfaces) current.push_back(lan.name);
+  std::sort(current.begin(), current.end());
+
+  if (current == joinedInterfaces_) return;
+  joinedInterfaces_ = current;
+
+  for (const auto& lan : interfaces) {
+    struct ip_mreq request {};
+    request.imr_multiaddr.s_addr = inet_addr(protocol::kDiscoveryMulticastGroup);
+    request.imr_interface.s_addr = lan.address;
+    setsockopt(socketFd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &request,
+               sizeof(request));
+  }
 }
 
 DiscoveryService::DiscoveryService(protocol::DeviceInfo localDevice)
@@ -40,6 +106,15 @@ bool DiscoveryService::start() {
   int reuseEnable = 1;
   setsockopt(socketFd_, SOL_SOCKET, SO_REUSEADDR, &reuseEnable,
              sizeof(reuseEnable));
+  setsockopt(socketFd_, SOL_SOCKET, SO_REUSEPORT, &reuseEnable,
+             sizeof(reuseEnable));
+
+  int multicastTtl = 1;
+  setsockopt(socketFd_, IPPROTO_IP, IP_MULTICAST_TTL, &multicastTtl,
+             sizeof(multicastTtl));
+  int multicastLoop = 1;
+  setsockopt(socketFd_, IPPROTO_IP, IP_MULTICAST_LOOP, &multicastLoop,
+             sizeof(multicastLoop));
 
   struct timeval timeout {};
   timeout.tv_sec = 0;
@@ -58,6 +133,9 @@ bool DiscoveryService::start() {
     return false;
   }
 
+  joinedInterfaces_.clear();
+  refreshMulticastMemberships();
+
   running_ = true;
   thread_ = std::thread(&DiscoveryService::run, this);
   return true;
@@ -71,24 +149,52 @@ void DiscoveryService::stop() {
     close(socketFd_);
     socketFd_ = -1;
   }
+  joinedInterfaces_.clear();
   std::lock_guard<std::mutex> lock(mutex_);
   devices_.clear();
+}
+
+void DiscoveryService::sendDatagram(int socketFd,
+                                     const std::string& payload) const {
+  const auto interfaces = LanInterfaces();
+
+  for (const auto& lan : interfaces) {
+    struct sockaddr_in destination {};
+    destination.sin_family = AF_INET;
+    destination.sin_port = htons(protocol::kDiscoveryBroadcastPort);
+
+    if (lan.broadcast != 0) {
+      destination.sin_addr.s_addr = lan.broadcast;
+      sendto(socketFd, payload.data(), payload.size(), 0,
+             reinterpret_cast<struct sockaddr*>(&destination),
+             sizeof(destination));
+    }
+
+    struct in_addr egress {};
+    egress.s_addr = lan.address;
+    if (setsockopt(socketFd, IPPROTO_IP, IP_MULTICAST_IF, &egress,
+                   sizeof(egress)) == 0) {
+      destination.sin_addr.s_addr =
+          inet_addr(protocol::kDiscoveryMulticastGroup);
+      sendto(socketFd, payload.data(), payload.size(), 0,
+             reinterpret_cast<struct sockaddr*>(&destination),
+             sizeof(destination));
+    }
+  }
+
+  struct sockaddr_in fallback {};
+  fallback.sin_family = AF_INET;
+  fallback.sin_port = htons(protocol::kDiscoveryBroadcastPort);
+  fallback.sin_addr.s_addr = INADDR_BROADCAST;
+  sendto(socketFd, payload.data(), payload.size(), 0,
+         reinterpret_cast<struct sockaddr*>(&fallback), sizeof(fallback));
 }
 
 void DiscoveryService::sendAnnounce(int socketFd) const {
   protocol::AnnouncePacket packet;
   packet.device = localDevice_;
   packet.protoVersion = protocol::kProtocolVersion;
-  const auto json = protocol::ToJson(packet);
-
-  struct sockaddr_in broadcastAddress {};
-  broadcastAddress.sin_family = AF_INET;
-  broadcastAddress.sin_port = htons(protocol::kDiscoveryBroadcastPort);
-  broadcastAddress.sin_addr.s_addr = INADDR_BROADCAST;
-
-  sendto(socketFd, json.data(), json.size(), 0,
-         reinterpret_cast<struct sockaddr*>(&broadcastAddress),
-         sizeof(broadcastAddress));
+  sendDatagram(socketFd, protocol::ToJson(packet));
 }
 
 void DiscoveryService::handlePacket(const char* data, size_t length,
@@ -177,6 +283,8 @@ void DiscoveryService::run() {
 
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSweep)
             .count() >= 1000) {
+      refreshMulticastMemberships();
+
       bool changed = false;
       {
         std::lock_guard<std::mutex> lock(mutex_);

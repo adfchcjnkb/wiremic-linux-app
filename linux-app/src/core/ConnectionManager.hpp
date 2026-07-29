@@ -113,6 +113,9 @@ class ConnectionManager : public QObject {
   void stopAudio();
   void drainCapturedAudio();
 
+  bool ensureVirtualMic(uint32_t sampleRate, uint8_t channels);
+  void destroyVirtualMic();
+
   protocol::DeviceInfo localDevice_;
   std::filesystem::path appDataDir_;
   ConnectionManagerSettings settings_;
@@ -141,6 +144,7 @@ class ConnectionManager : public QObject {
 
   std::unique_ptr<audio::AudioReceiver> audioReceiver_;
   std::unique_ptr<platform::VirtualMicBackend> virtualMic_;
+  platform::VirtualMicConfig virtualMicConfig_;
   std::unique_ptr<audio::AudioSender> audioSender_;
   std::unique_ptr<platform::PipeWireAudioCapture> audioCapture_;
   platform::AudioServerKind audioServerKind_{platform::AudioServerKind::None};

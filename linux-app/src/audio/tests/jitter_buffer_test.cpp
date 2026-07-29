@@ -99,6 +99,42 @@ int main() {
               << buffer.currentTargetDepthFrames() << "\n";
   }
 
+  {
+    JitterBuffer buffer(10, 1, 8, 2);
+    for (uint64_t seq = 0; seq < 100; ++seq) {
+      buffer.Push(seq, PayloadFor(seq), false, base + frameInterval * seq);
+    }
+
+    WIREMIC_CHECK(buffer.queuedLeadFrames() <= 16);
+
+    auto outcome = buffer.Pop();
+    WIREMIC_CHECK(outcome.result == JitterPopResult::Ready);
+    WIREMIC_CHECK(outcome.payload != PayloadFor(0));
+
+    int drained = 0;
+    while (buffer.Pop().result != JitterPopResult::NotReady && drained < 64) {
+      ++drained;
+    }
+    WIREMIC_CHECK(drained < 16);
+
+    std::cout << "BACKLOG_SKIPS_TO_LIVE_EDGE_OK\n";
+  }
+
+  {
+    JitterBuffer buffer(10, 1, 8, 2);
+    auto now = base;
+    uint64_t seq = 0;
+    for (int i = 0; i < 500; ++i) {
+      buffer.Push(seq, PayloadFor(seq), false, now);
+      ++seq;
+      now += frameInterval;
+      buffer.Pop();
+    }
+    WIREMIC_CHECK(buffer.queuedLeadFrames() <= 8);
+    std::cout << "STEADY_STATE_LEAD_BOUNDED_OK lead="
+              << buffer.queuedLeadFrames() << "\n";
+  }
+
   std::cout << "JITTER_BUFFER_TESTS_PASSED\n";
   return 0;
 }

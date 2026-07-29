@@ -5,6 +5,7 @@
 #include <spa/utils/hook.h>
 #include <spa/param/audio/format-utils.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -49,9 +50,9 @@ class PipeWireVirtualMic {
   struct spa_hook streamListener_{};
 
   std::vector<int16_t> ringBuffer_;
-  size_t writePos_{0};
-  size_t readPos_{0};
-  size_t available_{0};
+  std::atomic<uint64_t> writeCount_{0};
+  std::atomic<uint64_t> readCount_{0};
+  size_t maxBufferedSamples_{0};
   bool running_{false};
 };
 

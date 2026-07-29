@@ -38,12 +38,21 @@ class PulseAudioBackend final : public VirtualMicBackend {
 }
 
 AudioServerKind DetectAudioServer() {
+  const auto flavour = PulseAudioVirtualMic::QueryServerFlavour();
+
+  if (flavour == PulseAudioVirtualMic::ServerFlavour::PulseAudio) {
+    return AudioServerKind::PulseAudio;
+  }
+
   if (PipeWireVirtualMic::IsPipeWireAvailable()) {
     return AudioServerKind::PipeWire;
   }
-  if (PulseAudioVirtualMic::IsPulseAudioAvailable()) {
+
+  if (flavour == PulseAudioVirtualMic::ServerFlavour::PipeWirePulse ||
+      PulseAudioVirtualMic::IsPulseAudioAvailable()) {
     return AudioServerKind::PulseAudio;
   }
+
   return AudioServerKind::None;
 }
 

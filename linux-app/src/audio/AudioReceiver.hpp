@@ -4,6 +4,7 @@
 #include <QTimer>
 #include <QUdpSocket>
 
+#include <chrono>
 #include <memory>
 #include <vector>
 
@@ -36,6 +37,8 @@ class AudioReceiver : public QObject {
   void onPlayoutTick();
 
  private:
+  bool emitOneFrame();
+
   SessionKey key_;
   uint32_t sampleRate_;
   int channels_;
@@ -47,6 +50,10 @@ class AudioReceiver : public QObject {
   JitterBuffer jitterBuffer_;
   QTimer playoutTimer_;
   int frameSamples_;
+
+  std::chrono::steady_clock::time_point playoutEpoch_;
+  bool playoutClockRunning_{false};
+  uint64_t framesEmitted_{0};
 };
 
 }

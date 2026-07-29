@@ -1,15 +1,22 @@
 #include "PulseAudioVirtualMic.hpp"
 
 #include <pulse/error.h>
+#include <pulse/pulseaudio.h>
 #include <pulse/simple.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <memory>
 #include <sstream>
+#include <vector>
 #include <iostream>
 
 namespace wiremic::platform {
+
+namespace {
+constexpr uint32_t kTargetBufferFrames = 3;
+}
 
 PulseAudioVirtualMic::PulseAudioVirtualMic(const VirtualMicConfig& config)
     : config_(config),
@@ -30,6 +37,77 @@ bool PulseAudioVirtualMic::IsPulseAudioAvailable() {
         return true;
     }
     return false;
+}
+
+PulseAudioVirtualMic::ServerFlavour PulseAudioVirtualMic::QueryServerFlavour() {
+    pa_mainloop* loop = pa_mainloop_new();
+    if (!loop) return ServerFlavour::None;
+
+    pa_context* context =
+        pa_context_new(pa_mainloop_get_api(loop), "wiremic-detect");
+    if (!context) {
+        pa_mainloop_free(loop);
+        return ServerFlavour::None;
+    }
+
+    auto flavour = ServerFlavour::None;
+    bool finished = false;
+
+    if (pa_context_connect(context, nullptr, PA_CONTEXT_NOFLAGS, nullptr) < 0) {
+        pa_context_unref(context);
+        pa_mainloop_free(loop);
+        return ServerFlavour::None;
+    }
+
+    struct Query {
+        ServerFlavour* flavour;
+        bool* finished;
+        pa_context* context;
+    } query{&flavour, &finished, context};
+
+    pa_context_set_state_callback(
+        context,
+        [](pa_context* ctx, void* userdata) {
+            auto* q = static_cast<Query*>(userdata);
+            switch (pa_context_get_state(ctx)) {
+                case PA_CONTEXT_READY:
+                    pa_operation_unref(pa_context_get_server_info(
+                        ctx,
+                        [](pa_context*, const pa_server_info* info,
+                           void* inner) {
+                            auto* q2 = static_cast<Query*>(inner);
+                            const std::string name =
+                                info && info->server_name ? info->server_name : "";
+                            std::string lowered = name;
+                            std::transform(lowered.begin(), lowered.end(),
+                                           lowered.begin(), ::tolower);
+                            *q2->flavour =
+                                lowered.find("pipewire") != std::string::npos
+                                    ? ServerFlavour::PipeWirePulse
+                                    : ServerFlavour::PulseAudio;
+                            *q2->finished = true;
+                        },
+                        q));
+                    break;
+                case PA_CONTEXT_FAILED:
+                case PA_CONTEXT_TERMINATED:
+                    *q->finished = true;
+                    break;
+                default:
+                    break;
+            }
+        },
+        &query);
+
+    constexpr int kMaxIterations = 200;
+    for (int i = 0; i < kMaxIterations && !finished; ++i) {
+        if (pa_mainloop_iterate(loop, 1, nullptr) < 0) break;
+    }
+
+    pa_context_disconnect(context);
+    pa_context_unref(context);
+    pa_mainloop_free(loop);
+    return flavour;
 }
 
 bool PulseAudioVirtualMic::runPactlCommand(const std::string& cmd, std::string& output) {
@@ -56,8 +134,41 @@ int PulseAudioVirtualMic::parseModuleId(const std::string& output) {
     return stream.fail() ? -1 : id;
 }
 
+void PulseAudioVirtualMic::unloadStaleModules() {
+    std::string listing;
+    if (!runPactlCommand("pactl list modules short 2>/dev/null", listing)) {
+        return;
+    }
+
+    std::istringstream stream(listing);
+    std::string line;
+    std::vector<int> staleIds;
+
+    while (std::getline(stream, line)) {
+        if (line.find(sinkName_) == std::string::npos &&
+            line.find(sourceName_) == std::string::npos) {
+            continue;
+        }
+        std::istringstream lineStream(line);
+        int id = -1;
+        lineStream >> id;
+        if (!lineStream.fail() && id >= 0) staleIds.push_back(id);
+    }
+
+    std::sort(staleIds.rbegin(), staleIds.rend());
+
+    std::string output;
+    for (const int id : staleIds) {
+        std::ostringstream cmd;
+        cmd << "pactl unload-module " << id << " 2>/dev/null";
+        runPactlCommand(cmd.str(), output);
+    }
+}
+
 bool PulseAudioVirtualMic::loadModules() {
     std::string output;
+
+    unloadStaleModules();
 
     std::ostringstream cmd1;
     cmd1 << "pactl load-module module-null-sink sink_name=" << sinkName_
@@ -125,6 +236,19 @@ bool PulseAudioVirtualMic::start() {
     spec.rate = config_.sampleRate;
     spec.channels = config_.channels;
 
+    const uint32_t bytesPerSample =
+        static_cast<uint32_t>(sizeof(int16_t)) * config_.channels;
+    const uint32_t frameBytes =
+        bytesPerSample *
+        std::max<uint32_t>(1, config_.sampleRate * config_.frameSizeMs / 1000);
+
+    pa_buffer_attr attr{};
+    attr.maxlength = frameBytes * kTargetBufferFrames * 3;
+    attr.tlength = frameBytes * kTargetBufferFrames;
+    attr.prebuf = 0;
+    attr.minreq = frameBytes;
+    attr.fragsize = static_cast<uint32_t>(-1);
+
     int error = 0;
     playbackStream_ = pa_simple_new(nullptr,
                                     config_.nodeName.c_str(),
@@ -133,7 +257,7 @@ bool PulseAudioVirtualMic::start() {
                                     "WireMic audio feed",
                                     &spec,
                                     nullptr,
-                                    nullptr,
+                                    &attr,
                                     &error);
 
     if (!playbackStream_) {
@@ -199,11 +323,11 @@ void PulseAudioVirtualMic::pushSamples(const int16_t* interleaved,
         return;
     }
 
-    constexpr size_t kMaxQueuedFrames = 100;
+    constexpr size_t kMaxQueuedFrames = 4;
 
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
-        if (queue_.size() >= kMaxQueuedFrames) queue_.pop_front();
+        while (queue_.size() >= kMaxQueuedFrames) queue_.pop_front();
         queue_.emplace_back(interleaved, interleaved + sampleCount);
     }
     queueSignal_.notify_one();

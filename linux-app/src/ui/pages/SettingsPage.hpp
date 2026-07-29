@@ -17,7 +17,6 @@ class SettingsPage : public QWidget {
 
   void setTrustedDevices(const QStringList& ids, const QStringList& names);
   void setToggleStates(bool autoConnect, bool rememberTrusted);
-  // index: 0 = Ultra Low (5ms), 1 = Low (10ms), 2 = Balanced (20ms)
   void setLatencyModeIndex(int index);
 
  signals:

@@ -107,6 +107,8 @@ bool ConnectionManager::start() {
   if (!discovery_->start()) {
     return false;
   }
+
+  ensureVirtualMic(48000, 1);
   return true;
 }
 
@@ -123,7 +125,48 @@ void ConnectionManager::stop() {
   }
   controlServer_.stop();
   if (discovery_) discovery_->stop();
+  destroyVirtualMic();
   hasActiveConnection_ = false;
+}
+
+bool ConnectionManager::ensureVirtualMic(uint32_t sampleRate,
+                                          uint8_t channels) {
+  if (virtualMic_ && virtualMic_->isRunning() &&
+      virtualMicConfig_.sampleRate == sampleRate &&
+      virtualMicConfig_.channels == channels) {
+    return true;
+  }
+
+  destroyVirtualMic();
+
+  virtualMicConfig_.sampleRate = sampleRate;
+  virtualMicConfig_.channels = channels;
+
+  virtualMic_ = platform::CreateVirtualMic(virtualMicConfig_, audioServerKind_);
+  if (!virtualMic_) {
+    emit errorOccurred(QStringLiteral(
+        "No PipeWire or PulseAudio server is running — the virtual microphone "
+        "could not be published."));
+    return false;
+  }
+
+  if (!virtualMic_->start()) {
+    virtualMic_.reset();
+    emit errorOccurred(
+        QStringLiteral("Publishing the virtual microphone via %1 failed.")
+            .arg(audioBackendName()));
+    return false;
+  }
+
+  emit audioStateChanged(virtualMicActive(), audioBackendName());
+  return true;
+}
+
+void ConnectionManager::destroyVirtualMic() {
+  if (!virtualMic_) return;
+  virtualMic_->stop();
+  virtualMic_.reset();
+  emit audioStateChanged(false, audioBackendName());
 }
 
 quint16 ConnectionManager::controlPort() const { return controlServer_.port(); }
@@ -274,22 +317,10 @@ bool ConnectionManager::startAudioReceive(protocol::AudioSession& session) {
     return false;
   }
 
-  platform::VirtualMicConfig micConfig;
-  micConfig.sampleRate = session.sampleRate;
-  micConfig.channels = session.channels;
-  micConfig.frameSizeMs = session.frameSizeMs;
-
-  virtualMic_ = platform::CreateVirtualMic(micConfig, audioServerKind_);
-  if (!virtualMic_) {
+  if (!ensureVirtualMic(session.sampleRate,
+                        static_cast<uint8_t>(session.channels))) {
     emit errorOccurred(QStringLiteral(
-        "No PipeWire or PulseAudio server is running — connected, but no "
-        "virtual microphone could be created."));
-  } else if (!virtualMic_->start()) {
-    virtualMic_.reset();
-    emit errorOccurred(
-        QStringLiteral("Connected, but creating the virtual microphone via %1 "
-                       "failed.")
-            .arg(audioBackendName()));
+        "Connected, but audio has nowhere to go — no virtual microphone."));
   }
 
   session.udpPort = audioReceiver_->port();
@@ -345,7 +376,7 @@ bool ConnectionManager::startAudioSend(const protocol::AudioSession& session,
   }
 
   captureDrainTimer_.start();
-  emit audioStateChanged(false, audioBackendName());
+  emit audioStateChanged(virtualMicActive(), audioBackendName());
   return true;
 }
 
@@ -389,16 +420,12 @@ void ConnectionManager::stopAudio() {
     audioReceiver_->stop();
     audioReceiver_.reset();
   }
-  if (virtualMic_) {
-    virtualMic_->stop();
-    virtualMic_.reset();
-  }
   {
     std::lock_guard<std::mutex> lock(captureMutex_);
     capturedSamples_.clear();
   }
 
-  if (wasActive) emit audioStateChanged(false, audioBackendName());
+  if (wasActive) emit audioStateChanged(virtualMicActive(), audioBackendName());
 }
 
 void ConnectionManager::onIncomingRequest(protocol::ConnectRequest request,

@@ -39,13 +39,25 @@ class DiscoveryService : public QObject {
   void onSweepTimer();
   void onRebindTimer();
  private:
+  struct LanInterface {
+    QString name;
+    QHostAddress address;
+    QHostAddress broadcast;
+  };
+
   bool bindSocket();
   void scheduleRebind();
   void sendAnnounce();
   bool broadcast(const QByteArray& bytes);
   void handlePacket(const QByteArray& data, const QHostAddress& sender);
+
+  [[nodiscard]] static std::vector<LanInterface> LanInterfaces();
+  void refreshMulticastMemberships();
+  bool sendToInterface(const QByteArray& bytes, const LanInterface& interface);
+
   protocol::DeviceInfo localDevice_;
   QUdpSocket socket_;
+  QStringList joinedGroups_;
   QTimer announceTimer_;
   QTimer sweepTimer_;
   QTimer rebindTimer_;

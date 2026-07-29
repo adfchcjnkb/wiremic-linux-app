@@ -32,12 +32,14 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
 
     private var started = false
     private var multicastLock: WifiManager.MulticastLock? = null
+    private val networkBinder = NetworkBinder(application)
 
     fun start() {
         if (started) return
         started = true
 
         acquireMulticastLock()
+        networkBinder.bind()
         NativeBridge.nativeSetListener(this)
 
         val prefs = getApplication<Application>().getSharedPreferences("wiremic", 0)
@@ -59,6 +61,7 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
     fun stop() {
         started = false
         NativeBridge.nativeStop()
+        networkBinder.unbind()
         releaseMulticastLock()
     }
 
@@ -129,6 +132,7 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
     override fun onCleared() {
         super.onCleared()
         NativeBridge.nativeSetListener(null)
+        networkBinder.unbind()
         releaseMulticastLock()
     }
 }

@@ -32,9 +32,17 @@ class PulseAudioVirtualMic {
 
   [[nodiscard]] static bool IsPulseAudioAvailable();
 
+  enum class ServerFlavour {
+    None,
+    PulseAudio,
+    PipeWirePulse
+  };
+  [[nodiscard]] static ServerFlavour QueryServerFlavour();
+
  private:
   bool loadModules();
   void unloadModules();
+  void unloadStaleModules();
   bool runPactlCommand(const std::string& cmd, std::string& output);
   int parseModuleId(const std::string& output);
   void writerLoop();

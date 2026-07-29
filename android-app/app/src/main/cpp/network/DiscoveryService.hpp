@@ -37,15 +37,26 @@ class DiscoveryService {
   [[nodiscard]] std::vector<DiscoveredDevice> devices() const;
 
  private:
+  struct LanInterface {
+    std::string name;
+    uint32_t address{0};
+    uint32_t broadcast{0};
+  };
+
   void run();
   void sendAnnounce(int socketFd) const;
+  void sendDatagram(int socketFd, const std::string& payload) const;
   void handlePacket(const char* data, size_t length, const std::string& senderIp);
   void notify();
+
+  [[nodiscard]] static std::vector<LanInterface> LanInterfaces();
+  void refreshMulticastMemberships();
 
   protocol::DeviceInfo localDevice_;
   std::atomic<bool> running_{false};
   std::thread thread_;
   int socketFd_{-1};
+  std::vector<std::string> joinedInterfaces_;
 
   mutable std::mutex mutex_;
   std::unordered_map<std::string, DiscoveredDevice> devices_;

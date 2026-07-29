@@ -77,6 +77,7 @@ add_library(wiremic_audio STATIC
     src/audio/JitterBuffer.cpp
     src/audio/AudioSender.cpp
     src/audio/AudioReceiver.cpp
+    src/audio/UdpSocketBinder.cpp
 )
 
 target_include_directories(wiremic_audio PUBLIC

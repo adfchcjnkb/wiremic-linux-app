@@ -104,6 +104,11 @@ bool AudioSender::start(const protocol::AudioSession& session,
     return false;
   }
 
+  const int32_t framesPerBurst = AAudioStream_getFramesPerBurst(stream_);
+  if (framesPerBurst > 0) {
+    AAudioStream_setBufferSizeInFrames(stream_, framesPerBurst * 2);
+  }
+
   if (AAudioStream_requestStart(stream_) != AAUDIO_OK) {
     if (errorCallback_) errorCallback_("failed to start AAudio input stream");
     AAudioStream_close(stream_);
@@ -165,7 +170,7 @@ aaudio_data_callback_result_t AudioSender::handleAudioData(
   pending_.insert(pending_.end(), frames,
                    frames + static_cast<size_t>(numFrames) * channels_);
 
-  const size_t maxPending = chunk * 32;
+  const size_t maxPending = chunk * 3;
   if (pending_.size() > maxPending) {
     pending_.erase(pending_.begin(),
                     pending_.begin() +

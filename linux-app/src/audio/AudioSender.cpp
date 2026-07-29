@@ -4,6 +4,8 @@
 
 #include <exception>
 
+#include "UdpSocketBinder.hpp"
+
 namespace wiremic::audio {
 
 AudioSender::AudioSender(SessionKey key, uint32_t sampleRate, int channels,
@@ -21,9 +23,11 @@ AudioSender::AudioSender(SessionKey key, uint32_t sampleRate, int channels,
                                                     bitrateKbps)) {}
 
 bool AudioSender::start() {
-  if (!socket_.bind(QHostAddress::AnyIPv4, 0)) {
+  QString bindError;
+  quint16 boundPort = 0;
+  if (!BindUdpSocket(socket_, 0, boundPort, bindError)) {
     emit errorOccurred(QStringLiteral("Failed to bind audio sender socket: %1")
-                            .arg(socket_.errorString()));
+                            .arg(bindError));
     return false;
   }
   sequence_ = 0;

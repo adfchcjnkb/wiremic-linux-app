@@ -2,6 +2,10 @@
 
 #include <QNetworkDatagram>
 
+#include <algorithm>
+
+#include "UdpSocketBinder.hpp"
+
 namespace wiremic::audio {
 
 AudioReceiver::AudioReceiver(SessionKey key, uint32_t sampleRate,
@@ -20,51 +24,32 @@ AudioReceiver::AudioReceiver(SessionKey key, uint32_t sampleRate,
           &AudioReceiver::onReadyRead);
   connect(&playoutTimer_, &QTimer::timeout, this,
           &AudioReceiver::onPlayoutTick);
+  playoutTimer_.setTimerType(Qt::PreciseTimer);
 }
 
 bool AudioReceiver::start() {
-  constexpr int kMaxBindAttempts = 5;
-  const quint16 requestedPort = localPort_;
-  QString lastError;
+  QString bindError;
+  quint16 boundPort = 0;
 
-  for (int attempt = 0; attempt < kMaxBindAttempts; ++attempt) {
-    if (socket_.state() != QAbstractSocket::UnconnectedState) {
-      socket_.close();
-    }
-
-    if (!socket_.bind(QHostAddress::AnyIPv4, requestedPort)) {
-      lastError = socket_.errorString();
-      continue;
-    }
-
-    localPort_ = socket_.localPort();
-    if (localPort_ != 0) {
-      playoutTimer_.start(frameSizeMs_);
-      return true;
-    }
-
-    // Rare but real: the bind() syscall can succeed while the OS
-    // momentarily fails to hand back the assigned ephemeral port (seen with
-    // some VPN/firewall setups and sandboxed environments). Retrying with a
-    // fresh bind almost always clears it, since it is a transient allocation
-    // hiccup rather than a persistent condition.
-    lastError = QStringLiteral(
-        "socket bound but the OS reported no local port");
-    socket_.close();
+  if (!BindUdpSocket(socket_, localPort_, boundPort, bindError)) {
+    emit errorOccurred(
+        QStringLiteral("Failed to bind the audio receiver socket: %1. A VPN, "
+                       "firewall, or sandbox may be restricting UDP.")
+            .arg(bindError));
+    return false;
   }
 
-  emit errorOccurred(
-      QStringLiteral(
-          "Failed to bind a usable audio receiver socket after %1 "
-          "attempts: %2. This can happen if a VPN, firewall, or sandboxed "
-          "environment is restricting UDP port allocation.")
-          .arg(kMaxBindAttempts)
-          .arg(lastError));
-  return false;
+  localPort_ = boundPort;
+  playoutClockRunning_ = false;
+  framesEmitted_ = 0;
+  playoutTimer_.start(frameSizeMs_);
+  return true;
 }
 
 void AudioReceiver::stop() {
   playoutTimer_.stop();
+  playoutClockRunning_ = false;
+  framesEmitted_ = 0;
   socket_.close();
 }
 
@@ -96,11 +81,44 @@ void AudioReceiver::onReadyRead() {
 }
 
 void AudioReceiver::onPlayoutTick() {
+  const auto now = std::chrono::steady_clock::now();
+
+  if (!playoutClockRunning_) {
+    if (jitterBuffer_.bufferedCount() == 0) return;
+    playoutClockRunning_ = true;
+    playoutEpoch_ = now;
+    framesEmitted_ = 0;
+  }
+
+  const auto elapsedMs =
+      std::chrono::duration_cast<std::chrono::milliseconds>(now - playoutEpoch_)
+          .count();
+  uint64_t framesDue =
+      static_cast<uint64_t>(elapsedMs) / std::max<uint8_t>(1, frameSizeMs_) + 1;
+  if (framesDue <= framesEmitted_) framesDue = framesEmitted_ + 1;
+
+  constexpr uint64_t kMaxFramesPerTick = 8;
+  uint64_t budget = framesDue - framesEmitted_;
+  if (budget > kMaxFramesPerTick) {
+    framesEmitted_ = framesDue - kMaxFramesPerTick;
+    budget = kMaxFramesPerTick;
+  }
+
+  for (uint64_t i = 0; i < budget; ++i) {
+    if (!emitOneFrame()) {
+      playoutClockRunning_ = false;
+      return;
+    }
+    ++framesEmitted_;
+  }
+}
+
+bool AudioReceiver::emitOneFrame() {
   const auto outcome = jitterBuffer_.Pop();
 
   switch (outcome.result) {
     case JitterPopResult::NotReady:
-      return;
+      return false;
 
     case JitterPopResult::Ready: {
       try {
@@ -122,7 +140,7 @@ void AudioReceiver::onPlayoutTick() {
           emit pcmFrameReady(std::move(silence), true);
         }
       }
-      return;
+      return true;
     }
 
     case JitterPopResult::Loss: {
@@ -138,7 +156,7 @@ void AudioReceiver::onPlayoutTick() {
                                       0);
         emit pcmFrameReady(std::move(silence), true);
       }
-      return;
+      return true;
     }
 
     case JitterPopResult::Silence: {
@@ -146,9 +164,10 @@ void AudioReceiver::onPlayoutTick() {
                                         static_cast<size_t>(channels_),
                                     0);
       emit pcmFrameReady(std::move(silence), false);
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 }

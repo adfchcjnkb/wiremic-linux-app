@@ -19,6 +19,71 @@ using namespace std::chrono_literals;
 namespace {
 constexpr int kSweepIntervalMs = 1000;
 constexpr int kRebindIntervalMs = 1000;
+
+bool IsTunnelInterface(const QString& name) {
+  static const char* const kTunnelPrefixes[] = {
+      "tun", "tap", "wg", "ppp", "ipsec", "utun", "gpd",
+      "nordlynx", "proton", "tailscale", "zt", "vboxnet", "docker"};
+  for (const char* prefix : kTunnelPrefixes) {
+    if (name.startsWith(QLatin1String(prefix), Qt::CaseInsensitive)) return true;
+  }
+  return false;
+}
+}
+
+std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
+  std::vector<LanInterface> result;
+
+  for (const auto& interface : QNetworkInterface::allInterfaces()) {
+    const auto flags = interface.flags();
+    if (!flags.testFlag(QNetworkInterface::IsUp) ||
+        !flags.testFlag(QNetworkInterface::IsRunning) ||
+        flags.testFlag(QNetworkInterface::IsLoopBack)) {
+      continue;
+    }
+    if (IsTunnelInterface(interface.name())) continue;
+
+    for (const auto& entry : interface.addressEntries()) {
+      if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol) continue;
+      if (entry.ip().isLoopback()) continue;
+
+      LanInterface lan;
+      lan.name = interface.name();
+      lan.address = entry.ip();
+      lan.broadcast = entry.broadcast();
+      result.push_back(lan);
+    }
+  }
+
+  return result;
+}
+
+void DiscoveryService::refreshMulticastMemberships() {
+  if (!bound_) return;
+
+  const auto interfaces = LanInterfaces();
+
+  QStringList current;
+  current.reserve(static_cast<qsizetype>(interfaces.size()));
+  for (const auto& lan : interfaces) current << lan.name;
+  current.sort();
+
+  if (current == joinedGroups_) return;
+  joinedGroups_ = current;
+
+  const int fd = static_cast<int>(socket_.socketDescriptor());
+  if (fd < 0) return;
+
+  const QHostAddress group(
+      QString::fromLatin1(protocol::kDiscoveryMulticastGroup));
+
+  for (const auto& lan : interfaces) {
+    ip_mreq request{};
+    request.imr_multiaddr.s_addr = htonl(group.toIPv4Address());
+    request.imr_interface.s_addr = htonl(lan.address.toIPv4Address());
+
+    ::setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &request, sizeof(request));
+  }
 }
 
 DiscoveryService::DiscoveryService(protocol::DeviceInfo localDevice,
@@ -52,6 +117,13 @@ bool DiscoveryService::bindSocket() {
   ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable));
   ::setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &enable, sizeof(enable));
 
+  const int multicastTtl = 1;
+  ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &multicastTtl,
+               sizeof(multicastTtl));
+  const int multicastLoop = 1;
+  ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, &multicastLoop,
+               sizeof(multicastLoop));
+
   sockaddr_in address{};
   address.sin_family = AF_INET;
   address.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -74,6 +146,8 @@ bool DiscoveryService::bindSocket() {
 
   bindError_.clear();
   bound_ = true;
+  joinedGroups_.clear();
+  refreshMulticastMemberships();
   return true;
 }
 
@@ -99,6 +173,7 @@ void DiscoveryService::stop() {
   if (!running_) return;
   running_ = false;
   bound_ = false;
+  joinedGroups_.clear();
   announceTimer_.stop();
   sweepTimer_.stop();
   rebindTimer_.stop();
@@ -155,29 +230,44 @@ void DiscoveryService::sendAnnounce() {
   }
 }
 
-bool DiscoveryService::broadcast(const QByteArray& bytes) {
-  bool sentAny =
-      socket_.writeDatagram(bytes, QHostAddress::Broadcast,
-                             protocol::kDiscoveryBroadcastPort) >= 0;
+bool DiscoveryService::sendToInterface(const QByteArray& bytes,
+                                        const LanInterface& lan) {
+  bool sentAny = false;
 
-  for (const auto& interface : QNetworkInterface::allInterfaces()) {
-    const auto flags = interface.flags();
-    if (!flags.testFlag(QNetworkInterface::IsUp) ||
-        !flags.testFlag(QNetworkInterface::IsRunning) ||
-        flags.testFlag(QNetworkInterface::IsLoopBack) ||
-        !flags.testFlag(QNetworkInterface::CanBroadcast)) {
-      continue;
-    }
-    for (const auto& entry : interface.addressEntries()) {
-      if (entry.broadcast().isNull() ||
-          entry.ip().protocol() != QAbstractSocket::IPv4Protocol) {
-        continue;
-      }
-      sentAny = socket_.writeDatagram(bytes, entry.broadcast(),
+  if (!lan.broadcast.isNull()) {
+    sentAny = socket_.writeDatagram(bytes, lan.broadcast,
+                                     protocol::kDiscoveryBroadcastPort) >= 0;
+  }
+
+  const int fd = static_cast<int>(socket_.socketDescriptor());
+  if (fd >= 0) {
+    in_addr egress{};
+    egress.s_addr = htonl(lan.address.toIPv4Address());
+    if (::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &egress,
+                     sizeof(egress)) == 0) {
+      const QHostAddress group(
+          QString::fromLatin1(protocol::kDiscoveryMulticastGroup));
+      sentAny = socket_.writeDatagram(bytes, group,
                                        protocol::kDiscoveryBroadcastPort) >= 0 ||
                  sentAny;
     }
   }
+
+  return sentAny;
+}
+
+bool DiscoveryService::broadcast(const QByteArray& bytes) {
+  const auto interfaces = LanInterfaces();
+
+  bool sentAny = false;
+  for (const auto& lan : interfaces) {
+    sentAny = sendToInterface(bytes, lan) || sentAny;
+  }
+
+  sentAny = socket_.writeDatagram(bytes, QHostAddress::Broadcast,
+                                   protocol::kDiscoveryBroadcastPort) >= 0 ||
+             sentAny;
+
   return sentAny;
 }
 
@@ -265,6 +355,9 @@ void DiscoveryService::onAnnounceTimer() { sendAnnounce(); }
 
 void DiscoveryService::onSweepTimer() {
   if (!running_) return;
+
+  refreshMulticastMemberships();
+
   const auto now = std::chrono::steady_clock::now();
   std::vector<std::string> toRemove;
 
