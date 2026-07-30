@@ -197,6 +197,29 @@ void DiscoveryService::sendAnnounce(int socketFd) const {
   sendDatagram(socketFd, protocol::ToJson(packet));
 }
 
+// Answers whoever was just heard from directly instead of waiting for the next
+// broadcast round. Broadcast is the part of discovery that networks interfere
+// with -- access points drop it, Windows Firewall drops unsolicited inbound
+// datagrams -- and a directed reply means it only has to work in one of the two
+// directions for the two devices to find each other.
+void DiscoveryService::sendDirectedAnnounce(int socketFd,
+                                             const std::string& peerIp) const {
+  protocol::AnnouncePacket packet;
+  packet.device = localDevice_;
+  packet.protoVersion = protocol::kProtocolVersion;
+  packet.reply = true;
+
+  const std::string payload = protocol::ToJson(packet);
+
+  struct sockaddr_in destination {};
+  destination.sin_family = AF_INET;
+  destination.sin_port = htons(protocol::kDiscoveryBroadcastPort);
+  if (inet_pton(AF_INET, peerIp.c_str(), &destination.sin_addr) != 1) return;
+
+  sendto(socketFd, payload.data(), payload.size(), 0,
+         reinterpret_cast<struct sockaddr*>(&destination), sizeof(destination));
+}
+
 void DiscoveryService::handlePacket(const char* data, size_t length,
                                      const std::string& senderIp) {
   const std::string text(data, length);
@@ -221,6 +244,13 @@ void DiscoveryService::handlePacket(const char* data, size_t length,
   if (parsed->device.id == localDevice_.id) return;
 
   parsed->device.ip = senderIp;
+
+  // A reply is never answered, so the two devices exchange at most one extra
+  // datagram per announce and cannot talk each other into a loop.
+  if (!parsed->reply && socketFd_ >= 0) {
+    sendDirectedAnnounce(socketFd_, senderIp);
+  }
+
   const auto now = std::chrono::steady_clock::now();
 
   {

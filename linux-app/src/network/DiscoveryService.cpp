@@ -17,13 +17,30 @@ namespace {
 constexpr int kSweepIntervalMs = 1000;
 constexpr int kRebindIntervalMs = 1000;
 
-bool IsTunnelInterface(const QString& name) {
+bool IsTunnelInterface(const QNetworkInterface& iface) {
   static const char* const kTunnelPrefixes[] = {
       "tun", "tap", "wg", "ppp", "ipsec", "utun", "gpd",
       "nordlynx", "proton", "tailscale", "zt", "vboxnet", "docker"};
   for (const char* prefix : kTunnelPrefixes) {
-    if (name.startsWith(QLatin1String(prefix), Qt::CaseInsensitive)) return true;
+    if (iface.name().startsWith(QLatin1String(prefix), Qt::CaseInsensitive)) {
+      return true;
+    }
   }
+
+  // On Windows the adapter name is a GUID, so the prefixes above never match
+  // and a VPN would be treated as a LAN. The description is the only readable
+  // identifier there.
+  static const char* const kTunnelWords[] = {
+      "tap-windows", "tap-nordvpn", "wireguard", "openvpn", "wintun",
+      "vpn",         "tunnel",      "tailscale", "zerotier", "hyper-v",
+      "virtualbox",  "vmware",      "loopback"};
+  const QString description = iface.humanReadableName();
+  for (const char* word : kTunnelWords) {
+    if (description.contains(QLatin1String(word), Qt::CaseInsensitive)) {
+      return true;
+    }
+  }
+
   return false;
 }
 }
@@ -38,7 +55,7 @@ std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
         flags.testFlag(QNetworkInterface::IsLoopBack)) {
       continue;
     }
-    if (IsTunnelInterface(iface.name())) continue;
+    if (IsTunnelInterface(iface)) continue;
 
     for (const auto& entry : iface.addressEntries()) {
       if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol) continue;
@@ -217,6 +234,24 @@ void DiscoveryService::onRebindTimer() {
   }
 }
 
+// Answers whoever was just heard from directly instead of waiting for the next
+// broadcast round. Broadcast is the part of discovery that networks interfere
+// with -- access points drop it, Windows Firewall drops unsolicited inbound
+// datagrams -- and a directed reply means it only has to work in one of the two
+// directions for the two devices to find each other.
+void DiscoveryService::sendDirectedAnnounce(const QHostAddress& peer) {
+  if (!running_ || !bound_) return;
+  if (socket_.state() != QAbstractSocket::BoundState) return;
+
+  protocol::AnnouncePacket packet;
+  packet.device = localDevice_;
+  packet.protoVersion = protocol::kProtocolVersion;
+  packet.reply = true;
+
+  socket_.writeDatagram(QByteArray::fromStdString(protocol::ToJson(packet)),
+                        peer, protocol::kDiscoveryBroadcastPort);
+}
+
 void DiscoveryService::sendAnnounce() {
   if (!running_) return;
 
@@ -331,6 +366,10 @@ void DiscoveryService::handlePacket(const QByteArray& data,
     if (convertible) senderAddress = QHostAddress(ipv4);
   }
   parsed->device.ip = senderAddress.toString().toStdString();
+
+  // A reply is never answered, so the two devices exchange at most one extra
+  // datagram per announce and cannot talk each other into a loop.
+  if (!parsed->reply) sendDirectedAnnounce(senderAddress);
 
   const auto now = std::chrono::steady_clock::now();
   auto it = devices_.find(parsed->device.id);

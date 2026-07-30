@@ -5,6 +5,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# The wire protocol is the contract between the phone and the desktop. It used
+# to be duplicated into this tree, and the copies drifted apart and broke the
+# build; there is now one copy and both apps compile it.
+get_filename_component(WIREMIC_SHARED
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../shared" ABSOLUTE)
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -39,14 +45,16 @@ add_library(wiremic_native SHARED
     audio/OpusCodec.cpp
     audio/AudioPacketCodec.cpp
     audio/JitterBuffer.cpp
-    protocol/Protocol.cpp
-    protocol/MessageFraming.cpp
+    ${WIREMIC_SHARED}/protocol/Protocol.cpp
+    ${WIREMIC_SHARED}/protocol/MessageFraming.cpp
     security/CertificateManager.cpp
     security/TrustedDeviceStore.cpp
 )
 
 target_include_directories(wiremic_native PRIVATE
-    protocol
+    ${WIREMIC_SHARED}/protocol
+    ${WIREMIC_SHARED}/platform
+    ${WIREMIC_SHARED}/audio
     security
     audio
     network

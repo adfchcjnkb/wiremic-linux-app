@@ -172,11 +172,72 @@ begin
   end;
 end;
 
+{ Windows Firewall blocks unsolicited inbound datagrams for any program that
+  has no rule, and on a network Windows has classified as Public it blocks them
+  without ever prompting. Discovery is unsolicited inbound UDP by definition, so
+  without these rules the phone broadcasts into a void: it can hear the PC but
+  the PC never hears the phone, and neither side can open the control channel.
+  Setup runs elevated, which is the one moment we can add the rules silently. }
+procedure RemoveFirewallRules();
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+       'advfirewall firewall delete rule name="WireMic (UDP-In)"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+       'advfirewall firewall delete rule name="WireMic (TCP-In)"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure AddFirewallRules();
+var
+  Target: String;
+  ResultCode: Integer;
+  UdpOk, TcpOk: Boolean;
+begin
+  Target := ExpandConstant('{app}\{#AppExeName}');
+
+  { Reinstalling must not stack duplicate rules, and a rule left over from an
+    install at a different path would not match this executable. }
+  RemoveFirewallRules();
+
+  UdpOk := Exec(ExpandConstant('{sys}\netsh.exe'),
+    'advfirewall firewall add rule name="WireMic (UDP-In)" dir=in action=allow'
+    + ' program="' + Target + '" protocol=UDP profile=any enable=yes',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+
+  TcpOk := Exec(ExpandConstant('{sys}\netsh.exe'),
+    'advfirewall firewall add rule name="WireMic (TCP-In)" dir=in action=allow'
+    + ' program="' + Target + '" protocol=TCP profile=any enable=yes',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+
+  if not (UdpOk and TcpOk) then
+  begin
+    MsgBox('WireMic could not add its Windows Firewall rules automatically.'
+           + #13#10 + #13#10 +
+           'Without them your phone will not be able to find this computer. '
+           + 'Open WireMic and use "Repair network permissions" on the '
+           + 'Settings page, or allow ' + Target + ' through the firewall for '
+           + 'private and public networks.', mbError, MB_OK);
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    AddFirewallRules();
     if WizardIsTaskSelected('installcable') and not CableAlreadyInstalled() then
       InstallCable();
   end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  { Leaving firewall holes behind for an executable that no longer exists is
+    untidy at best. VB-CABLE is left installed on purpose: the user may have
+    had it before WireMic, and other applications may now depend on it. }
+  if CurUninstallStep = usUninstall then
+    RemoveFirewallRules();
 end;

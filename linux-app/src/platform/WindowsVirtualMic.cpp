@@ -367,8 +367,15 @@ bool WindowsVirtualMic::start() {
 
   writeCount_.store(0);
   readCount_.store(0);
-  resampleCursor_ = 0.0;
-  haveResampleHistory_ = false;
+
+  playoutResampler_.Reset(static_cast<int32_t>(config_.sampleRate),
+                          static_cast<int32_t>(deviceRate_));
+  // Sized so the render thread never has to grow either buffer: growing means
+  // allocating, and allocating on an audio thread is how buffers get missed.
+  resampleInput_.assign(static_cast<size_t>(bufferFrames_) * 2 + 512, 0);
+  resampleOutput_.clear();
+  resampleOutput_.reserve(static_cast<size_t>(bufferFrames_) * 4 + 1024);
+  resampleOutputRead_ = 0;
 
   hr = client_->Start();
   if (FAILED(hr)) {
@@ -425,9 +432,8 @@ void WindowsVirtualMic::pushSamples(const int16_t* interleaved,
 }
 
 // Converts our 48 kHz mono stream into whatever shared-mode format VB-CABLE
-// negotiated: usually 44.1 or 48 kHz float32 stereo. Anything left over from a
-// previous call is carried in resampleCursor_/resampleHistory_ so the
-// interpolation stays continuous across buffers.
+// negotiated: usually 44.1 or 48 kHz float32 stereo. Runs on the WASAPI render
+// thread, so it must not allocate -- both scratch buffers are sized in start().
 void WindowsVirtualMic::writeInto(unsigned char* destination, uint32_t frames) {
   const uint64_t written = writeCount_.load(std::memory_order_acquire);
   uint64_t read = readCount_.load(std::memory_order_relaxed);
@@ -440,28 +446,42 @@ void WindowsVirtualMic::writeInto(unsigned char* destination, uint32_t frames) {
   const double ratio = static_cast<double>(config_.sampleRate) /
                         static_cast<double>(deviceRate_);
 
+  // Drop whatever has already been handed to the device, then top the filter up
+  // until it can supply this whole buffer or the network stream runs dry.
+  if (resampleOutputRead_ > 0) {
+    resampleOutput_.erase(
+        resampleOutput_.begin(),
+        resampleOutput_.begin() + static_cast<long>(resampleOutputRead_));
+    resampleOutputRead_ = 0;
+  }
+
+  while (resampleOutput_.size() < frames && read < written) {
+    const size_t shortfall = frames - resampleOutput_.size();
+    size_t want = static_cast<size_t>(
+                      static_cast<double>(shortfall) * ratio + 0.5) +
+                  64;
+    const size_t havePcm = static_cast<size_t>(written - read);
+    if (want > havePcm) want = havePcm;
+    if (want > resampleInput_.size()) want = resampleInput_.size();
+    if (want == 0) break;
+
+    for (size_t i = 0; i < want; ++i) {
+      resampleInput_[i] = ring_[(read + i) % ringSize];
+    }
+    read += want;
+
+    playoutResampler_.Process(resampleInput_.data(), want, resampleOutput_);
+  }
+
   auto* asFloat = reinterpret_cast<float*>(destination);
   auto* asShort = reinterpret_cast<int16_t*>(destination);
 
   for (uint32_t f = 0; f < frames; ++f) {
+    // Underrun plays silence rather than repeating the last sample, which
+    // would be a tone rather than a gap.
     double sample = 0.0;
-
-    if (read < written) {
-      const int16_t current = ring_[read % ringSize];
-      if (!haveResampleHistory_) {
-        resampleHistory_ = current;
-        haveResampleHistory_ = true;
-      }
-      const double a = resampleHistory_;
-      const double b = current;
-      sample = a + (b - a) * resampleCursor_;
-
-      resampleCursor_ += ratio;
-      while (resampleCursor_ >= 1.0 && read < written) {
-        resampleHistory_ = ring_[read % ringSize];
-        ++read;
-        resampleCursor_ -= 1.0;
-      }
+    if (resampleOutputRead_ < resampleOutput_.size()) {
+      sample = resampleOutput_[resampleOutputRead_++];
     }
 
     for (uint32_t c = 0; c < deviceChannels_; ++c) {

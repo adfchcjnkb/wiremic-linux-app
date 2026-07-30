@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 
+#include "MonoResampler.hpp"
 #include "VirtualMicConfig.hpp"
 
 struct IMMDevice;
@@ -72,9 +73,16 @@ class WindowsVirtualMic {
   std::atomic<uint64_t> writeCount_{0};
   std::atomic<uint64_t> readCount_{0};
   size_t maxBufferedSamples_{0};
-  double resampleCursor_{0.0};
-  int16_t resampleHistory_{0};
-  bool haveResampleHistory_{false};
+
+  // VB-CABLE usually negotiates 44.1 kHz while WireMic carries 48 kHz, so the
+  // playout side resamples too. It needs the same band-limited filter as the
+  // capture side: interpolating between neighbouring samples folds the images
+  // of the source rate back into the audible band, which is heard as a hiss
+  // riding on top of the voice.
+  audio::MonoResampler playoutResampler_;
+  std::vector<int16_t> resampleInput_;
+  std::vector<int16_t> resampleOutput_;
+  size_t resampleOutputRead_{0};
 };
 
 }

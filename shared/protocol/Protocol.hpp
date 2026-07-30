@@ -140,6 +140,14 @@ std::optional<DisconnectMessage> ParseDisconnect(const std::string& json);
 struct AnnouncePacket {
   DeviceInfo device;
   uint16_t protoVersion{kProtocolVersion};
+
+  // Set on an announce sent straight back to whoever was just heard from,
+  // rather than shouted at the whole subnet. Discovery then only needs
+  // broadcast to survive in one direction: access points that drop broadcast
+  // one way, and firewalls that allow the reply to an address the machine has
+  // already talked to, both stop being fatal. A reply is never answered with
+  // another reply, so the exchange cannot loop.
+  bool reply{false};
 };
 
 std::string ToJson(const AnnouncePacket& packet);

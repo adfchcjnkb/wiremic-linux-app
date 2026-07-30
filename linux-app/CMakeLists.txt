@@ -15,7 +15,9 @@ else()
 endif()
 
 if(WIN32)
-    set(WIREMIC_PLATFORM_SOURCES src/platform/WindowsVirtualMic.cpp)
+    set(WIREMIC_PLATFORM_SOURCES
+        src/platform/WindowsVirtualMic.cpp
+        src/platform/WindowsFirewall.cpp)
     set(WIREMIC_PLATFORM_LIBS ole32 oleaut32 winmm ws2_32 iphlpapi shell32 uuid)
     set(WIREMIC_PLATFORM_INCLUDES "")
 else()
@@ -76,6 +78,7 @@ add_library(wiremic_platform STATIC
 
 target_include_directories(wiremic_platform PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio
     ${WIREMIC_PLATFORM_INCLUDES}
 )
 
@@ -262,6 +265,7 @@ endif()
 
 if(WIREMIC_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    find_package(Threads REQUIRED)
 
     add_executable(wiremic_widget_interaction_test
         src/ui/tests/widget_interaction_test.cpp
@@ -336,9 +340,20 @@ if(WIREMIC_BUILD_TESTS)
     add_executable(wiremic_mono_resampler_test
         src/audio/tests/mono_resampler_test.cpp)
     target_include_directories(wiremic_mono_resampler_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../android-app/app/src/main/cpp/audio)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio)
     target_link_libraries(wiremic_mono_resampler_test PRIVATE wiremic_testing)
     add_test(NAME mono_resampler COMMAND wiremic_mono_resampler_test)
+
+    # The queue between the phone's audio callback and its sender thread. Only
+    # the phone uses it, but it is plain C++, so it is proved here where a
+    # thread sanitiser can be pointed at it.
+    add_executable(wiremic_pcm_ring_buffer_test
+        src/audio/tests/pcm_ring_buffer_test.cpp)
+    target_include_directories(wiremic_pcm_ring_buffer_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio)
+    target_link_libraries(wiremic_pcm_ring_buffer_test PRIVATE
+        wiremic_testing Threads::Threads)
+    add_test(NAME pcm_ring_buffer COMMAND wiremic_pcm_ring_buffer_test)
 
     wiremic_add_test(control_channel_loopback
         src/network/tests/control_channel_loopback_test.cpp

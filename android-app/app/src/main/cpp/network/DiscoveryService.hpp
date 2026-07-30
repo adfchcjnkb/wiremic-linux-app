@@ -45,6 +45,7 @@ class DiscoveryService {
 
   void run();
   void sendAnnounce(int socketFd) const;
+  void sendDirectedAnnounce(int socketFd, const std::string& peerIp) const;
   void sendDatagram(int socketFd, const std::string& payload) const;
   void handlePacket(const char* data, size_t length, const std::string& senderIp);
   void notify();

@@ -8,6 +8,7 @@
 namespace wiremic::ui {
 
 class ToggleSwitch;
+class GlassButton;
 
 class SettingsPage : public QWidget {
   Q_OBJECT
@@ -32,6 +33,21 @@ class SettingsPage : public QWidget {
   QVBoxLayout* trustedListLayout_;
   QWidget* trustedListContainer_;
   QLabel* emptyLabel_;
+
+#ifdef _WIN32
+  // Deliberately plain member functions rather than slots: moc parses this
+  // header without the compiler's platform macros, so anything it has to see
+  // must not sit behind a platform guard.
+  QWidget* buildWindowsCard(QWidget* parent);
+  void refreshWindowsStatus();
+  void makeVirtualMicDefault();
+  void restorePreviousMic();
+  void repairFirewall();
+
+  QLabel* cableStatusLabel_{nullptr};
+  QLabel* firewallStatusLabel_{nullptr};
+  GlassButton* restoreMicButton_{nullptr};
+#endif
 };
 
 }

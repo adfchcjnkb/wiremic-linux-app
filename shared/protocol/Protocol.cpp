@@ -217,6 +217,7 @@ std::string ToJson(const AnnouncePacket& packet) {
   };
   node.merge_patch(DeviceToJson(packet.device));
   node["controlPort"] = packet.device.controlPort;
+  if (packet.reply) node["reply"] = true;
   return node.dump();
 }
 
@@ -231,6 +232,7 @@ std::optional<AnnouncePacket> ParseAnnounce(const std::string& text) {
     AnnouncePacket packet;
     packet.device = *device;
     packet.protoVersion = node.value("protoVersion", kProtocolVersion);
+    packet.reply = node.value("reply", false);
     return packet;
   } catch (const json::exception&) {
     return std::nullopt;

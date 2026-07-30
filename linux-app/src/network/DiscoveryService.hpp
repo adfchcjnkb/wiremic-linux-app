@@ -48,6 +48,7 @@ class DiscoveryService : public QObject {
   bool bindSocket();
   void scheduleRebind();
   void sendAnnounce();
+  void sendDirectedAnnounce(const QHostAddress& peer);
   bool broadcast(const QByteArray& bytes);
   void handlePacket(const QByteArray& data, const QHostAddress& sender);
 
