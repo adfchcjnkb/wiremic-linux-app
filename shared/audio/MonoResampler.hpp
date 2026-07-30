@@ -92,6 +92,11 @@ class MonoResampler {
   static constexpr size_t kHalfTaps = kTaps / 2;
   static constexpr size_t kPhases = 256;
 
+  // Spelled out rather than taken from <cmath>: M_PI is a POSIX extension that
+  // MSVC only defines if _USE_MATH_DEFINES was set before the header was first
+  // included, which a shared header has no way to guarantee.
+  static constexpr double kPi = 3.14159265358979323846;
+
   static double BesselI0(double x) {
     double sum = 1.0;
     double term = 1.0;
@@ -130,7 +135,7 @@ class MonoResampler {
         const double sinc =
             std::fabs(scaled) < 1e-9
                 ? 1.0
-                : std::sin(M_PI * scaled) / (M_PI * scaled);
+                : std::sin(kPi * scaled) / (kPi * scaled);
 
         const double u = distance / static_cast<double>(kHalfTaps);
         const double window =
