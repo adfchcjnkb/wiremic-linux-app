@@ -17,6 +17,11 @@ constexpr int kInviteTimeoutMs = 15000;
 constexpr int kInviteRetryCount = 4;
 constexpr int kInviteRetryDelayMs = 400;
 
+// The virtual microphone is published once at this format and stays put. See
+// ensureVirtualMic() for why it must not follow the negotiated session format.
+constexpr uint32_t kVirtualMicSampleRate = 48000;
+constexpr uint8_t kVirtualMicChannels = 1;
+
 const char* AudioServerName(platform::AudioServerKind kind) {
   switch (kind) {
     case platform::AudioServerKind::PipeWire:
@@ -108,7 +113,7 @@ bool ConnectionManager::start() {
     return false;
   }
 
-  ensureVirtualMic(48000, 1);
+  ensureVirtualMic();
   return true;
 }
 
@@ -129,18 +134,19 @@ void ConnectionManager::stop() {
   hasActiveConnection_ = false;
 }
 
-bool ConnectionManager::ensureVirtualMic(uint32_t sampleRate,
-                                          uint8_t channels) {
-  if (virtualMic_ && virtualMic_->isRunning() &&
-      virtualMicConfig_.sampleRate == sampleRate &&
-      virtualMicConfig_.channels == channels) {
-    return true;
-  }
+bool ConnectionManager::ensureVirtualMic() {
+  if (virtualMic_ && virtualMic_->isRunning()) return true;
 
   destroyVirtualMic();
 
-  virtualMicConfig_.sampleRate = sampleRate;
-  virtualMicConfig_.channels = channels;
+  // The device is published once, at a fixed 48 kHz mono, and never rebuilt for
+  // the lifetime of the app. Recreating it to match whatever the phone happened
+  // to negotiate meant the module was unloaded out from under any application
+  // that had already opened it: a browser that was recording from WireMic went
+  // silent the moment a call connected, which is the worst possible time. Rate
+  // and channel differences are absorbed by resampling on the way in instead.
+  virtualMicConfig_.sampleRate = kVirtualMicSampleRate;
+  virtualMicConfig_.channels = kVirtualMicChannels;
 
   std::string publishedOn;
   virtualMic_ =
@@ -165,6 +171,48 @@ bool ConnectionManager::ensureVirtualMic(uint32_t sampleRate,
 
   emit audioStateChanged(virtualMicActive(), audioBackendName());
   return true;
+}
+
+void ConnectionManager::deliverToVirtualMic(const int16_t* samples,
+                                             size_t sampleCount,
+                                             uint32_t sourceRate,
+                                             uint8_t sourceChannels) {
+  if (!virtualMic_ || samples == nullptr || sampleCount == 0) return;
+  if (sourceChannels == 0) sourceChannels = 1;
+
+  const int16_t* mono = samples;
+  size_t monoCount = sampleCount;
+
+  if (sourceChannels > 1) {
+    const size_t frames = sampleCount / sourceChannels;
+    micMono_.resize(frames);
+    for (size_t f = 0; f < frames; ++f) {
+      int32_t sum = 0;
+      for (uint8_t c = 0; c < sourceChannels; ++c) {
+        sum += samples[f * sourceChannels + c];
+      }
+      micMono_[f] = static_cast<int16_t>(sum / sourceChannels);
+    }
+    mono = micMono_.data();
+    monoCount = frames;
+  }
+
+  if (sourceRate == 0) sourceRate = kVirtualMicSampleRate;
+  if (sourceRate != micResamplerInputRate_) {
+    micResampler_.Reset(static_cast<int32_t>(sourceRate),
+                        static_cast<int32_t>(kVirtualMicSampleRate));
+    micResamplerInputRate_ = sourceRate;
+  }
+
+  if (micResampler_.passthrough()) {
+    virtualMic_->pushSamples(mono, monoCount);
+    return;
+  }
+
+  micResampler_.Process(mono, monoCount, micResampled_);
+  if (!micResampled_.empty()) {
+    virtualMic_->pushSamples(micResampled_.data(), micResampled_.size());
+  }
 }
 
 void ConnectionManager::destroyVirtualMic() {
@@ -308,10 +356,16 @@ bool ConnectionManager::startAudioReceive(protocol::AudioSession& session) {
 
   connect(audioReceiver_.get(), &audio::AudioReceiver::errorOccurred, this,
           &ConnectionManager::errorOccurred);
+  const uint32_t sourceRate = session.sampleRate;
+  const auto sourceChannels = static_cast<uint8_t>(session.channels);
+  micResamplerInputRate_ = 0;
+
   connect(audioReceiver_.get(), &audio::AudioReceiver::pcmFrameReady, this,
-          [this](std::vector<int16_t> samples, bool) {
-            if (virtualMic_ && !samples.empty()) {
-              virtualMic_->pushSamples(samples.data(), samples.size());
+          [this, sourceRate, sourceChannels](std::vector<int16_t> samples,
+                                              bool) {
+            if (!samples.empty()) {
+              deliverToVirtualMic(samples.data(), samples.size(), sourceRate,
+                                  sourceChannels);
             }
           });
 
@@ -320,8 +374,7 @@ bool ConnectionManager::startAudioReceive(protocol::AudioSession& session) {
     return false;
   }
 
-  if (!ensureVirtualMic(session.sampleRate,
-                        static_cast<uint8_t>(session.channels))) {
+  if (!ensureVirtualMic()) {
     emit errorOccurred(QStringLiteral(
         "Connected, but audio has nowhere to go — no virtual microphone."));
   }

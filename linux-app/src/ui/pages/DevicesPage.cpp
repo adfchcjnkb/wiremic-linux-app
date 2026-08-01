@@ -3,9 +3,12 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QScrollArea>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "../components/GlassButton.hpp"
+#include "../components/GlassPanel.hpp"
+#include "DiscoveryService.hpp"
 
 namespace wiremic::ui {
 
@@ -43,6 +46,44 @@ DevicesPage::DevicesPage(QWidget* parent) : QWidget(parent) {
   statusLabel_->setStyleSheet("color: rgb(255,93,120); font-size: 12px;");
   statusLabel_->setVisible(false);
   rootLayout->addWidget(statusLabel_);
+
+  // Some networks never let the two devices find each other on their own --
+  // guest Wi-Fi that isolates clients, a firewall that drops the announcement.
+  // Showing the address here means there is always a way through: read it off
+  // this screen, type it into the phone.
+  auto* addressCard = new GlassPanel(this);
+  addressCard->setCornerRadius(14);
+  auto* addressLayout = new QVBoxLayout(addressCard);
+  addressLayout->setContentsMargins(16, 12, 16, 12);
+  addressLayout->setSpacing(4);
+
+  auto* addressTitle = new QLabel("This computer's address", addressCard);
+  addressTitle->setStyleSheet("color: rgb(164,168,186); font-size: 11px;");
+  addressLayout->addWidget(addressTitle);
+
+  addressLabel_ = new QLabel(addressCard);
+  addressLabel_->setWordWrap(true);
+  addressLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  addressLabel_->setStyleSheet(
+      "color: rgb(245,246,250); font-size: 17px; font-weight: 700;");
+  addressLayout->addWidget(addressLabel_);
+
+  auto* addressHint = new QLabel(
+      "If your phone does not appear below, type this into the phone's Nearby "
+      "screen.",
+      addressCard);
+  addressHint->setWordWrap(true);
+  addressHint->setStyleSheet("color: rgb(164,168,186); font-size: 11px;");
+  addressLayout->addWidget(addressHint);
+
+  rootLayout->addWidget(addressCard);
+  refreshLocalAddresses();
+
+  auto* addressTimer = new QTimer(this);
+  addressTimer->setInterval(5000);
+  connect(addressTimer, &QTimer::timeout, this,
+          &DevicesPage::refreshLocalAddresses);
+  addressTimer->start();
 
   auto* scrollArea = new QScrollArea(this);
   scrollArea->setWidgetResizable(true);
@@ -92,6 +133,15 @@ void DevicesPage::setDevices(const std::vector<DeviceRowData>& devices) {
   }
 
   emptyLabel_->setVisible(devices.empty());
+}
+
+void DevicesPage::refreshLocalAddresses() {
+  const QStringList addresses = network::DiscoveryService::LocalAddresses();
+  const QString text =
+      addresses.isEmpty()
+          ? QStringLiteral("Not connected to a network")
+          : addresses.join(QStringLiteral("   ·   "));
+  if (addressLabel_->text() != text) addressLabel_->setText(text);
 }
 
 void DevicesPage::setStatusMessage(const QString& message) {

@@ -274,4 +274,9 @@ void ConnectionManager::disconnectActive() {
 
 void ConnectionManager::refreshDiscovery() {}
 
+bool ConnectionManager::probeHost(const std::string& host) {
+  if (!discovery_) return false;
+  return discovery_->probeHost(host);
+}
+
 }

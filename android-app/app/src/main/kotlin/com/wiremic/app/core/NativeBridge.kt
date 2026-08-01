@@ -25,5 +25,6 @@ object NativeBridge {
     external fun nativeRequestConnection(deviceId: String)
     external fun nativeDisconnect()
     external fun nativeRefreshDiscovery()
+    external fun nativeProbeHost(host: String): Boolean
     external fun nativeGetDevices(): String
 }

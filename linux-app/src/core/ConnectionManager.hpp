@@ -18,6 +18,7 @@
 #include "ControlClient.hpp"
 #include "ControlServer.hpp"
 #include "DiscoveryService.hpp"
+#include "MonoResampler.hpp"
 #ifndef _WIN32
 #include "PipeWireAudioCapture.hpp"
 #endif
@@ -115,8 +116,10 @@ class ConnectionManager : public QObject {
   void stopAudio();
   void drainCapturedAudio();
 
-  bool ensureVirtualMic(uint32_t sampleRate, uint8_t channels);
+  bool ensureVirtualMic();
   void destroyVirtualMic();
+  void deliverToVirtualMic(const int16_t* samples, size_t sampleCount,
+                            uint32_t sourceRate, uint8_t sourceChannels);
 
   protocol::DeviceInfo localDevice_;
   std::filesystem::path appDataDir_;
@@ -147,6 +150,10 @@ class ConnectionManager : public QObject {
   std::unique_ptr<audio::AudioReceiver> audioReceiver_;
   std::unique_ptr<platform::VirtualMicBackend> virtualMic_;
   platform::VirtualMicConfig virtualMicConfig_;
+  audio::MonoResampler micResampler_;
+  std::vector<int16_t> micMono_;
+  std::vector<int16_t> micResampled_;
+  uint32_t micResamplerInputRate_{0};
   std::unique_ptr<audio::AudioSender> audioSender_;
 #ifndef _WIN32
   std::unique_ptr<platform::PipeWireAudioCapture> audioCapture_;

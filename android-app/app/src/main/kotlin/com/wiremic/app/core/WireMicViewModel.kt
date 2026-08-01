@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -99,6 +100,57 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
         NativeBridge.nativeRefreshDiscovery()
     }
 
+    private val _manualProbeStatus = MutableStateFlow<String?>(null)
+    val manualProbeStatus: StateFlow<String?> = _manualProbeStatus.asStateFlow()
+
+    /**
+     * Reaches a computer at a typed-in address instead of waiting for it to be
+     * discovered. Some access points drop broadcast traffic between clients and
+     * some firewalls drop the inbound datagram, and on those networks automatic
+     * discovery cannot work no matter how patient the person is. The computer
+     * shows its address on its own screen; typing it in gets past all of that.
+     */
+    fun connectToAddress(host: String) {
+        val trimmed = host.trim()
+        if (!IPV4_PATTERN.matches(trimmed)) {
+            _manualProbeStatus.value = "That does not look like an IP address."
+            return
+        }
+
+        _manualProbeStatus.value = "Looking for a computer at $trimmed…"
+        _lastError.value = null
+
+        viewModelScope.launch {
+            val known = _devices.value.map { it.id }.toSet()
+            var found = false
+
+            // Several rounds: the first datagram can arrive while the computer
+            // is still starting up, and a single miss should not be reported as
+            // a wrong address.
+            repeat(6) {
+                if (found) return@repeat
+                NativeBridge.nativeProbeHost(trimmed)
+                delay(500)
+                val fresh = _devices.value.firstOrNull { it.id !in known }
+                if (fresh != null) {
+                    found = true
+                    _manualProbeStatus.value = "Found ${fresh.name}."
+                    connect(fresh.id)
+                }
+            }
+
+            if (!found) {
+                _manualProbeStatus.value =
+                    "No computer answered at $trimmed. Check that WireMic is open " +
+                        "there and that both devices are on the same network."
+            }
+        }
+    }
+
+    fun clearManualProbeStatus() {
+        _manualProbeStatus.value = null
+    }
+
     override fun onDeviceListChanged(devicesJson: String) {
         _devices.value = DeviceInfo.listFromJson(devicesJson)
     }
@@ -134,5 +186,10 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
         NativeBridge.nativeSetListener(null)
         networkBinder.unbind()
         releaseMulticastLock()
+    }
+
+    private companion object {
+        val IPV4_PATTERN =
+            Regex("^((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)$")
     }
 }

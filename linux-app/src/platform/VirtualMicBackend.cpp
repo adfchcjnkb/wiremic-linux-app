@@ -116,20 +116,23 @@ std::vector<AudioServerKind> DetectAllAudioServers() {
     kinds.push_back(AudioServerKind::WindowsCable);
   }
 #else
+  // Publish on exactly one server. Two virtual microphones with the same name
+  // is the worst outcome for the person picking one from a browser dropdown:
+  // they have no way to tell which of the two carries audio, and picking wrong
+  // looks like the app is broken.
+  //
+  // The PulseAudio path is the one to prefer whenever a pulse socket answers,
+  // whether that is a real daemon or pipewire-pulse. Its null-sink + remapped
+  // source is a first-class device to every client, and the session manager
+  // links it without any cooperation from us. The native PipeWire source is
+  // only worth publishing when there is no pulse socket at all.
   const auto flavour = PulseAudioVirtualMic::QueryServerFlavour();
 
-  if (flavour == PulseAudioVirtualMic::ServerFlavour::PulseAudio) {
+  if (flavour != PulseAudioVirtualMic::ServerFlavour::None ||
+      PulseAudioVirtualMic::IsPulseAudioAvailable()) {
     kinds.push_back(AudioServerKind::PulseAudio);
-  }
-
-  if (PipeWireVirtualMic::IsPipeWireAvailable()) {
+  } else if (PipeWireVirtualMic::IsPipeWireAvailable()) {
     kinds.push_back(AudioServerKind::PipeWire);
-  }
-
-  if (kinds.empty() &&
-      (flavour == PulseAudioVirtualMic::ServerFlavour::PipeWirePulse ||
-       PulseAudioVirtualMic::IsPulseAudioAvailable())) {
-    kinds.push_back(AudioServerKind::PulseAudio);
   }
 #endif
 

@@ -274,6 +274,7 @@ if(WIREMIC_BUILD_TESTS)
         src/ui/components/NavRailButton.cpp
         src/ui/components/ToggleSwitch.cpp
         src/ui/components/DeviceRow.cpp
+        src/ui/components/GlassPanel.cpp
         src/ui/pages/DevicesPage.cpp
     )
     qt_add_resources(wiremic_widget_interaction_test "wiremic_icons_test1"
@@ -285,7 +286,7 @@ if(WIREMIC_BUILD_TESTS)
     )
     target_include_directories(wiremic_widget_interaction_test PRIVATE src/ui)
     target_link_libraries(wiremic_widget_interaction_test PRIVATE
-        Qt6::Widgets Qt6::Svg Qt6::Test wiremic_testing)
+        Qt6::Widgets Qt6::Svg Qt6::Test wiremic_testing wiremic_network)
     add_test(NAME widget_interaction COMMAND wiremic_widget_interaction_test -platform offscreen)
 
     add_executable(wiremic_icon_distinctness_test

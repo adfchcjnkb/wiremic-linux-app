@@ -50,6 +50,18 @@ std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
                           ->sin_addr.s_addr;
     }
 
+    // Tethering and hotspot interfaces do not always come with a broadcast
+    // address attached, and without one this interface would only ever be
+    // reached by multicast. The netmask is enough to work it out.
+    if (lan.broadcast == 0 && it->ifa_netmask != nullptr &&
+        it->ifa_netmask->sa_family == AF_INET) {
+      const uint32_t mask = reinterpret_cast<struct sockaddr_in*>(it->ifa_netmask)
+                                 ->sin_addr.s_addr;
+      if (mask != 0 && mask != 0xFFFFFFFFu) {
+        lan.broadcast = lan.address | ~mask;
+      }
+    }
+
     result.push_back(lan);
   }
 
@@ -218,6 +230,34 @@ void DiscoveryService::sendDirectedAnnounce(int socketFd,
 
   sendto(socketFd, payload.data(), payload.size(), 0,
          reinterpret_cast<struct sockaddr*>(&destination), sizeof(destination));
+}
+
+bool DiscoveryService::probeHost(const std::string& host) const {
+  const int socketFd = socketFd_;
+  if (socketFd < 0 || host.empty()) return false;
+
+  struct sockaddr_in destination {};
+  destination.sin_family = AF_INET;
+  destination.sin_port = htons(protocol::kDiscoveryBroadcastPort);
+  if (inet_pton(AF_INET, host.c_str(), &destination.sin_addr) != 1) return false;
+
+  protocol::AnnouncePacket packet;
+  packet.device = localDevice_;
+  packet.protoVersion = protocol::kProtocolVersion;
+  const std::string payload = protocol::ToJson(packet);
+
+  // Repeated a few times: this is a single unsolicited datagram on a network
+  // that has already proven unhelpful, and one lost packet would look to the
+  // person typing the address like the address was wrong.
+  bool sentAny = false;
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    const ssize_t sent =
+        sendto(socketFd, payload.data(), payload.size(), 0,
+               reinterpret_cast<struct sockaddr*>(&destination),
+               sizeof(destination));
+    if (sent >= 0) sentAny = true;
+  }
+  return sentAny;
 }
 
 void DiscoveryService::handlePacket(const char* data, size_t length,

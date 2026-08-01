@@ -36,6 +36,12 @@ class DiscoveryService {
 
   [[nodiscard]] std::vector<DiscoveredDevice> devices() const;
 
+  // Announces straight to one address instead of waiting to be found. This is
+  // the way out when broadcast and multicast are both being swallowed -- the
+  // person reads the IP off their computer and types it in, and the computer's
+  // reply puts it in the device list like any other discovery.
+  bool probeHost(const std::string& host) const;
+
  private:
   struct LanInterface {
     std::string name;

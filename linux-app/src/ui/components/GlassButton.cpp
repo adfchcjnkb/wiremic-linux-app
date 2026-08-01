@@ -4,8 +4,13 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPropertyAnimation>
+#include <QFontMetrics>
+#include <algorithm>
 #include "../Theme.hpp"
 namespace wiremic::ui {
+namespace {
+constexpr int kTextPadding = 14;
+}
 GlassButton::GlassButton(const QString& text, Variant variant, QWidget* parent)
     : QPushButton(text, parent), variant_(variant) {
   setCursor(Qt::PointingHandCursor);
@@ -99,6 +104,23 @@ void GlassButton::paintEvent(QPaintEvent*) {
   QFont f = font();
   f.setBold(true);
   painter.setFont(f);
-  painter.drawText(bounds, Qt::AlignCenter, text());
+  const QFontMetrics metrics(f);
+  const QRectF textBounds = bounds.adjusted(kTextPadding, 0, -kTextPadding, 0);
+  painter.drawText(
+      textBounds, Qt::AlignCenter,
+      metrics.elidedText(text(), Qt::ElideRight,
+                          static_cast<int>(textBounds.width())));
+}
+
+// Without this a long label makes the button refuse to be any narrower than its
+// text, which pushes the whole row wider than the window and shoves the buttons
+// beside it off the edge. Reporting a small floor lets the layout compress the
+// row instead, and the label elides rather than disappearing.
+QSize GlassButton::minimumSizeHint() const {
+  const QSize base = QPushButton::minimumSizeHint();
+  const QFontMetrics metrics(font());
+  const int floor = metrics.horizontalAdvance(QStringLiteral("Restore")) +
+                     2 * kTextPadding;
+  return {std::min(base.width(), floor), std::max(base.height(), 44)};
 }
 }

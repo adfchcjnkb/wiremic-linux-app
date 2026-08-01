@@ -115,6 +115,7 @@ private fun WireMicApp(
     val connectionState by viewModel.connectionState.collectAsState()
     val activeDevice by viewModel.activeDevice.collectAsState()
     val connectingDeviceId by viewModel.connectingDeviceId.collectAsState()
+    val manualProbeStatus by viewModel.manualProbeStatus.collectAsState()
 
     androidx.compose.runtime.LaunchedEffect(activeDevice) {
         if (activeDevice != null) {
@@ -144,7 +145,14 @@ private fun WireMicApp(
             Box(modifier = Modifier.weight(1f)) {
                 when (currentTab) {
                     0 -> HomeScreen(connectionState, activeDevice, devices.size)
-                    1 -> NearbyDevicesScreen(devices, connectingDeviceId, viewModel::connect, viewModel::refreshDevices)
+                    1 -> NearbyDevicesScreen(
+                        devices = devices,
+                        connectingDeviceId = connectingDeviceId,
+                        manualStatus = manualProbeStatus,
+                        onConnect = viewModel::connect,
+                        onRefresh = viewModel::refreshDevices,
+                        onConnectToAddress = viewModel::connectToAddress
+                    )
                     2 -> ConnectedDeviceScreen(activeDevice, connectionState, viewModel::disconnect)
                     3 -> SettingsScreen(
                         autoConnect = autoConnect == 1,

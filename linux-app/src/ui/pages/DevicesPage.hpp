@@ -23,6 +23,9 @@ class DevicesPage : public QWidget {
   void refreshRequested();
 
  private:
+  void refreshLocalAddresses();
+
+  QLabel* addressLabel_{nullptr};
   QVBoxLayout* listLayout_;
   QWidget* listContainer_;
   QLabel* emptyLabel_;

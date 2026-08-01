@@ -65,11 +65,36 @@ std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
       lan.name = iface.name();
       lan.address = entry.ip();
       lan.broadcast = entry.broadcast();
+
+      // Qt fills in the broadcast address from the kernel on Unix, but on
+      // Windows GetAdaptersAddresses does not report one and the entry comes
+      // back null. Losing the directed broadcast is what made the phone
+      // invisible there: multicast is routinely dropped by consumer access
+      // points, and 255.255.255.255 only ever leaves by one interface. The
+      // address is derivable from what we do have, so derive it.
+      if (lan.broadcast.isNull() &&
+          entry.netmask().protocol() == QAbstractSocket::IPv4Protocol) {
+        const quint32 ip = entry.ip().toIPv4Address();
+        const quint32 mask = entry.netmask().toIPv4Address();
+        if (mask != 0 && mask != 0xFFFFFFFFu) {
+          lan.broadcast = QHostAddress(ip | ~mask);
+        }
+      }
+
       result.push_back(lan);
     }
   }
 
   return result;
+}
+
+QStringList DiscoveryService::LocalAddresses() {
+  QStringList addresses;
+  for (const auto& lan : LanInterfaces()) {
+    const QString text = lan.address.toString();
+    if (!text.isEmpty() && !addresses.contains(text)) addresses << text;
+  }
+  return addresses;
 }
 
 void DiscoveryService::refreshMulticastMemberships() {

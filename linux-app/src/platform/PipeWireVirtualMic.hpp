@@ -40,7 +40,9 @@ class PipeWireVirtualMic {
   static void OnStreamStateChanged(void* userdata, pw_stream_state old_state,
                                     pw_stream_state new_state,
                                     const char* error);
-  void fillBuffer(int16_t* dst, uint32_t maxFrames, uint32_t& outFrames);
+  static void OnParamChanged(void* userdata, uint32_t id,
+                              const struct spa_pod* param);
+  void fillBuffer(void* dst, uint32_t maxFrames, uint32_t& outFrames);
 
   VirtualMicConfig config_;
   pw_thread_loop* loop_{nullptr};
@@ -54,6 +56,12 @@ class PipeWireVirtualMic {
   std::atomic<uint64_t> readCount_{0};
   size_t maxBufferedSamples_{0};
   bool running_{false};
+
+  // Filled in by param_changed once the server has picked a format. Until then
+  // there is nothing meaningful to render, so process() stays a no-op.
+  std::atomic<uint32_t> negotiatedFormat_{0};
+  std::atomic<uint32_t> negotiatedChannels_{0};
+  std::atomic<uint32_t> negotiatedStride_{0};
 };
 
 }

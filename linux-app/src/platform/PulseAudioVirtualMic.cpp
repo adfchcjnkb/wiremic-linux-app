@@ -6,7 +6,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <mutex>
 #include <memory>
 #include <sstream>
 #include <vector>
@@ -19,6 +22,11 @@ constexpr uint32_t kTargetBufferMs = 40;
 constexpr uint32_t kMinTargetBufferFrames = 3;
 constexpr uint32_t kQueueBufferMs = 40;
 constexpr size_t kMinQueuedFrames = 4;
+
+std::atomic<bool>& InstanceActive() {
+    static std::atomic<bool> active{false};
+    return active;
+}
 
 uint32_t BufferFramesFor(uint32_t windowMs, uint8_t frameSizeMs,
                          uint32_t minimumFrames) {
@@ -144,7 +152,20 @@ int PulseAudioVirtualMic::parseModuleId(const std::string& output) {
     return stream.fail() ? -1 : id;
 }
 
+// Sweeps leftovers from a previous run, and does it exactly once per process.
+//
+// The sweep matches on module name, which cannot tell a module abandoned by a
+// crashed run from one this very process is feeding right now. Running it a
+// second time therefore pulled the sink out from under our own open playback
+// stream: the stream was silently re-routed to a suspended device that never
+// drains, and the writer thread blocked inside pa_simple_write forever, taking
+// shutdown with it. Once per process is all the cleanup that was ever wanted.
 void PulseAudioVirtualMic::unloadStaleModules() {
+    static std::once_flag sweptOnce;
+    bool shouldSweep = false;
+    std::call_once(sweptOnce, [&shouldSweep]() { shouldSweep = true; });
+    if (!shouldSweep) return;
+
     std::string listing;
     if (!runPactlCommand("pactl list modules short 2>/dev/null", listing)) {
         return;
@@ -240,7 +261,25 @@ void PulseAudioVirtualMic::unloadModules() {
 bool PulseAudioVirtualMic::start() {
     if (running_) return true;
 
+    // One virtual microphone per process, enforced rather than assumed.
+    //
+    // The sink and source names are global to the audio server, so a second
+    // instance does not get a second device -- it gets a stream pointed at the
+    // first instance's sink and a set of modules that either instance may
+    // unload. When the first one shut down it took the second one's sink with
+    // it, and that instance's writer thread was left blocked inside
+    // pa_simple_write on a device that would never drain again, which hung
+    // shutdown for good. There is one microphone here; refusing the second is
+    // both the truthful answer and the safe one.
+    bool alreadyActive = false;
+    if (!InstanceActive().compare_exchange_strong(alreadyActive, true)) {
+        std::cerr << "A WireMic virtual microphone is already published by this "
+                     "process" << std::endl;
+        return false;
+    }
+
     if (!loadModules()) {
+        InstanceActive().store(false);
         return false;
     }
 
@@ -279,6 +318,7 @@ bool PulseAudioVirtualMic::start() {
     if (!playbackStream_) {
         std::cerr << "Failed to create PulseAudio stream: " << pa_strerror(error) << std::endl;
         unloadModules();
+        InstanceActive().store(false);
         return false;
     }
 
@@ -289,6 +329,8 @@ bool PulseAudioVirtualMic::start() {
 }
 
 void PulseAudioVirtualMic::stop() {
+    const bool wasRunning = running_;
+
     writerRunning_ = false;
     queueSignal_.notify_all();
     if (writerThread_.joinable()) writerThread_.join();
@@ -305,26 +347,53 @@ void PulseAudioVirtualMic::stop() {
 
     unloadModules();
     running_ = false;
+    if (wasRunning) InstanceActive().store(false);
 }
 
+// Writes without a break for as long as the device exists: real audio when
+// there is any, silence when there is not.
+//
+// This is not politeness, it is the difference between a working microphone and
+// a dead one. A PulseAudio playback stream that is left unwritten does not
+// simply pause -- the server keeps draining it, the stream's write position
+// falls behind the server's read position, and every sample handed over after
+// that is timestamped in the past and thrown away. The stream stays open, the
+// writes all report success, and nothing is ever heard again. What this looked
+// like from the outside was a virtual microphone that appeared in every
+// application's device list, could be selected, and was silent forever, because
+// the desktop app publishes the device at launch and the phone connects minutes
+// later.
+//
+// Nothing waits on a condition variable here on purpose: pa_simple_write blocks
+// until the server has room, which paces this loop at exactly the rate the sink
+// consumes. A timed wait would add its own delay on top of that and let the
+// stream drift behind again, slowly, which is the same failure with a longer
+// fuse.
 void PulseAudioVirtualMic::writerLoop() {
+    const size_t frameSamples =
+        static_cast<size_t>(config_.sampleRate) *
+        std::max<uint8_t>(1, config_.frameSizeMs) / 1000 * config_.channels;
+    const std::vector<int16_t> silence(std::max<size_t>(frameSamples, 1), 0);
+
     while (true) {
         std::vector<int16_t> frame;
         {
-            std::unique_lock<std::mutex> lock(queueMutex_);
-            queueSignal_.wait(lock, [this] {
-                return !queue_.empty() || !writerRunning_;
-            });
+            std::lock_guard<std::mutex> lock(queueMutex_);
             if (!writerRunning_ && queue_.empty()) return;
-            frame = std::move(queue_.front());
-            queue_.pop_front();
+            if (!queue_.empty()) {
+                frame = std::move(queue_.front());
+                queue_.pop_front();
+            }
         }
 
+        const std::vector<int16_t>& payload = frame.empty() ? silence : frame;
+
         int error = 0;
-        if (pa_simple_write(playbackStream_, frame.data(),
-                            frame.size() * sizeof(int16_t), &error) < 0) {
+        if (pa_simple_write(playbackStream_, payload.data(),
+                            payload.size() * sizeof(int16_t), &error) < 0) {
             std::cerr << "Failed to write to PulseAudio: " << pa_strerror(error)
                       << std::endl;
+            return;
         }
     }
 }

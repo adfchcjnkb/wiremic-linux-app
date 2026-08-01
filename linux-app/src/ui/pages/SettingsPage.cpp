@@ -37,6 +37,7 @@ QWidget* MakeSettingRow(QWidget* parent, const QString& title,
   titleLabel->setStyleSheet("color: rgb(245,246,250); font-size: 14px;");
   auto* subtitleLabel = new QLabel(subtitle, textColumn);
   subtitleLabel->setStyleSheet("color: rgb(164,168,186); font-size: 11px;");
+  subtitleLabel->setWordWrap(true);
   textLayout->addWidget(titleLabel);
   textLayout->addWidget(subtitleLabel);
 
@@ -61,6 +62,7 @@ QWidget* MakeComboRow(QWidget* parent, const QString& title,
   titleLabel->setStyleSheet("color: rgb(245,246,250); font-size: 14px;");
   auto* subtitleLabel = new QLabel(subtitle, textColumn);
   subtitleLabel->setStyleSheet("color: rgb(164,168,186); font-size: 11px;");
+  subtitleLabel->setWordWrap(true);
   textLayout->addWidget(titleLabel);
   textLayout->addWidget(subtitleLabel);
 
@@ -81,17 +83,38 @@ QWidget* MakeComboRow(QWidget* parent, const QString& title,
 }
 
 SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
-  auto* rootLayout = new QVBoxLayout(this);
-  rootLayout->setContentsMargins(0, 0, 0, 0);
+  // One scroll area around the whole page. Everything here -- toggles, the
+  // Windows card, the trusted list -- has to stay reachable in a short window,
+  // and the previous arrangement simply ran off the bottom edge with no way to
+  // get to it.
+  auto* pageLayout = new QVBoxLayout(this);
+  pageLayout->setContentsMargins(0, 0, 0, 0);
+
+  auto* pageScroll = new QScrollArea(this);
+  pageScroll->setWidgetResizable(true);
+  pageScroll->setFrameShape(QFrame::NoFrame);
+  pageScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  pageScroll->viewport()->setStyleSheet("background: transparent;");
+  pageLayout->addWidget(pageScroll);
+
+  auto* content = new QWidget();
+  content->setStyleSheet("background: transparent;");
+  pageScroll->setWidget(content);
+
+  auto* rootLayout = new QVBoxLayout(content);
+  rootLayout->setContentsMargins(0, 0, 8, 0);
   rootLayout->setSpacing(20);
 
-  auto* titleLabel = new QLabel("Settings", this);
+  auto* titleLabel = new QLabel("Settings", content);
   titleLabel->setStyleSheet(
       "color: rgb(245,246,250); font-size: 28px; font-weight: 700;");
   rootLayout->addWidget(titleLabel);
 
-  auto* settingsCard = new GlassPanel(this);
-  settingsCard->setFixedHeight(210);
+  auto* settingsCard = new GlassPanel(content);
+  // Sized by its contents rather than pinned to a number: the rows inside wrap
+  // their subtitles, so a fixed height clipped them the moment the window was
+  // narrow or the font larger than the one this was measured against.
+  settingsCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
   auto* settingsLayout = new QVBoxLayout(settingsCard);
   settingsLayout->setContentsMargins(20, 18, 20, 18);
   settingsLayout->setSpacing(16);
@@ -123,32 +146,28 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
   rootLayout->addWidget(settingsCard);
 
 #ifdef _WIN32
-  rootLayout->addWidget(buildWindowsCard(this));
+  rootLayout->addWidget(buildWindowsCard(content));
 #endif
 
-  auto* trustedTitle = new QLabel("Trusted Devices", this);
+  auto* trustedTitle = new QLabel("Trusted Devices", content);
   trustedTitle->setStyleSheet(
       "color: rgb(245,246,250); font-size: 16px; font-weight: 700;");
   rootLayout->addWidget(trustedTitle);
 
-  auto* scrollArea = new QScrollArea(this);
-  scrollArea->setWidgetResizable(true);
-  scrollArea->setFrameShape(QFrame::NoFrame);
-  scrollArea->viewport()->setStyleSheet("background: transparent;");
-
-  trustedListContainer_ = new QWidget();
+  trustedListContainer_ = new QWidget(content);
   trustedListContainer_->setStyleSheet("background: transparent;");
   trustedListLayout_ = new QVBoxLayout(trustedListContainer_);
-  trustedListLayout_->setContentsMargins(0, 0, 4, 0);
+  trustedListLayout_->setContentsMargins(0, 0, 0, 0);
   trustedListLayout_->setSpacing(8);
   trustedListLayout_->addStretch();
-  scrollArea->setWidget(trustedListContainer_);
-  rootLayout->addWidget(scrollArea, 1);
+  rootLayout->addWidget(trustedListContainer_);
 
-  emptyLabel_ = new QLabel("No trusted devices yet", this);
+  emptyLabel_ = new QLabel("No trusted devices yet", content);
   emptyLabel_->setAlignment(Qt::AlignCenter);
   emptyLabel_->setStyleSheet("color: rgb(164,168,186); font-size: 12px;");
   rootLayout->addWidget(emptyLabel_);
+
+  rootLayout->addStretch();
 }
 
 void SettingsPage::setToggleStates(bool autoConnect, bool rememberTrusted) {
@@ -228,30 +247,37 @@ QWidget* SettingsPage::buildWindowsCard(QWidget* parent) {
   cableStatusLabel_ = MakeStatusLabel(card);
   layout->addWidget(cableStatusLabel_);
 
-  auto* micRow = new QWidget(card);
-  auto* micLayout = new QHBoxLayout(micRow);
-  micLayout->setContentsMargins(0, 0, 0, 0);
-  micLayout->setSpacing(8);
-
+  // One action per line. Three long labels sharing a row left every one of them
+  // too narrow to read, and at the window sizes people actually use they ran
+  // into each other -- the buttons were there, but no one could tell what they
+  // were or which one they were about to press.
   auto* makeDefault =
       new GlassButton("Use WireMic as my microphone",
-                      GlassButton::Variant::Primary, micRow);
+                      GlassButton::Variant::Primary, card);
+  makeDefault->setMinimumHeight(46);
+  layout->addWidget(makeDefault);
+
+  auto* secondaryRow = new QWidget(card);
+  auto* secondaryLayout = new QHBoxLayout(secondaryRow);
+  secondaryLayout->setContentsMargins(0, 0, 0, 0);
+  secondaryLayout->setSpacing(10);
+
   restoreMicButton_ =
       new GlassButton("Restore previous", GlassButton::Variant::Secondary,
-                      micRow);
+                      secondaryRow);
   auto* openPanel = new GlassButton("Sound settings",
-                                     GlassButton::Variant::Secondary, micRow);
-
-  micLayout->addWidget(makeDefault, 1);
-  micLayout->addWidget(restoreMicButton_);
-  micLayout->addWidget(openPanel);
-  layout->addWidget(micRow);
+                                     GlassButton::Variant::Secondary,
+                                     secondaryRow);
+  secondaryLayout->addWidget(restoreMicButton_, 1);
+  secondaryLayout->addWidget(openPanel, 1);
+  layout->addWidget(secondaryRow);
 
   firewallStatusLabel_ = MakeStatusLabel(card);
   layout->addWidget(firewallStatusLabel_);
 
   auto* repair = new GlassButton("Repair network permissions",
                                   GlassButton::Variant::Secondary, card);
+  repair->setMinimumHeight(46);
   layout->addWidget(repair);
 
   connect(makeDefault, &GlassButton::clicked, this,

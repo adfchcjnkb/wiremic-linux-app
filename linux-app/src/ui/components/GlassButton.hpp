@@ -20,6 +20,8 @@ class GlassButton : public QPushButton {
   qreal hoverProgress() const;
   void setHoverProgress(qreal progress);
 
+  [[nodiscard]] QSize minimumSizeHint() const override;
+
  protected:
   void paintEvent(QPaintEvent* event) override;
   void enterEvent(QEnterEvent* event) override;

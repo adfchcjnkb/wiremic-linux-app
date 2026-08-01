@@ -308,6 +308,22 @@ Java_com_wiremic_app_core_NativeBridge_nativeRefreshDiscovery(JNIEnv*, jobject) 
   });
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_wiremic_app_core_NativeBridge_nativeProbeHost(JNIEnv* env, jobject,
+                                                        jstring host) {
+  bool sent = false;
+  RunGuarded("nativeProbeHost", [&]() {
+    std::lock_guard<std::mutex> lock(gManagerMutex);
+    if (!gManager) return;
+    const char* hostChars = env->GetStringUTFChars(host, nullptr);
+    const std::string address = hostChars;
+    env->ReleaseStringUTFChars(host, hostChars);
+    WIREMIC_LOG_INFO("Probing host %s directly", address.c_str());
+    sent = gManager->probeHost(address);
+  });
+  return sent ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_wiremic_app_core_NativeBridge_nativeGetDevices(JNIEnv* env, jobject) {
   std::string result = "[]";

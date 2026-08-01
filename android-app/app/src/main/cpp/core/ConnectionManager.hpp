@@ -50,6 +50,7 @@ class ConnectionManager {
   void requestConnection(const std::string& deviceId);
   void disconnectActive();
   void refreshDiscovery();
+  bool probeHost(const std::string& host);
 
   [[nodiscard]] std::vector<DiscoveredDevice> discoveredDevices() const;
   [[nodiscard]] std::optional<PeerState> activeConnection() const;

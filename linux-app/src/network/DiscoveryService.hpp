@@ -26,6 +26,11 @@ class DiscoveryService : public QObject {
   void refreshNow();
   bool sendInvite(const protocol::ConnectInvite& invite);
   [[nodiscard]] std::vector<DiscoveredDevice> devices() const;
+
+  // The addresses this computer is reachable at, in the same order and with the
+  // same filtering discovery itself uses. Shown on screen so someone whose
+  // network is swallowing discovery traffic can type one into their phone.
+  [[nodiscard]] static QStringList LocalAddresses();
  signals:
   void inviteReceived(const protocol::ConnectInvite& invite);
   void deviceDiscovered(const DiscoveredDevice& device);
