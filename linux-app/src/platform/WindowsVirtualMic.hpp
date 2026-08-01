@@ -45,6 +45,7 @@ class WindowsVirtualMic {
   // exits would silently break every other application's audio input.
   static bool MakeCableDefaultCaptureDevice(std::string* previousEndpointId,
                                              std::string* error);
+  [[nodiscard]] static bool IsCableDefaultCaptureDevice();
   static void OpenSoundControlPanel();
 
  private:

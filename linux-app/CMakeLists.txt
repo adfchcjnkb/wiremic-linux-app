@@ -74,6 +74,7 @@ target_compile_features(wiremic_network PUBLIC cxx_std_20)
 add_library(wiremic_platform STATIC
     ${WIREMIC_PLATFORM_SOURCES}
     src/platform/VirtualMicBackend.cpp
+    src/platform/DefaultMicControl.cpp
 )
 
 target_include_directories(wiremic_platform PUBLIC

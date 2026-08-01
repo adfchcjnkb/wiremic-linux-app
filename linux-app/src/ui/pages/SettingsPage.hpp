@@ -34,19 +34,23 @@ class SettingsPage : public QWidget {
   QWidget* trustedListContainer_;
   QLabel* emptyLabel_;
 
-#ifdef _WIN32
   // Deliberately plain member functions rather than slots: moc parses this
   // header without the compiler's platform macros, so anything it has to see
   // must not sit behind a platform guard.
-  QWidget* buildWindowsCard(QWidget* parent);
-  void refreshWindowsStatus();
+  QWidget* buildMicrophoneCard(QWidget* parent);
+  void refreshMicrophoneStatus();
   void makeVirtualMicDefault();
   void restorePreviousMic();
+
+  QLabel* micStatusLabel_{nullptr};
+  GlassButton* restoreMicButton_{nullptr};
+
+#ifdef _WIN32
+  QWidget* buildWindowsCard(QWidget* parent);
+  void refreshWindowsStatus();
   void repairFirewall();
 
-  QLabel* cableStatusLabel_{nullptr};
   QLabel* firewallStatusLabel_{nullptr};
-  GlassButton* restoreMicButton_{nullptr};
 #endif
 };
 

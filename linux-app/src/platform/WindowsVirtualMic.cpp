@@ -280,6 +280,26 @@ bool WindowsVirtualMic::MakeCableDefaultCaptureDevice(
   return true;
 }
 
+bool WindowsVirtualMic::IsCableDefaultCaptureDevice() {
+  const std::string current = CurrentDefaultCaptureId();
+  if (current.empty()) return false;
+
+  std::string name;
+  IMMDevice* device =
+      FindEndpointContaining(eCapture, kCableCaptureMatch, &name);
+  if (!device) return false;
+
+  LPWSTR id = nullptr;
+  std::string cableId;
+  if (SUCCEEDED(device->GetId(&id)) && id) {
+    cableId = ToUtf8(id);
+    ::CoTaskMemFree(id);
+  }
+  device->Release();
+
+  return !cableId.empty() && cableId == current;
+}
+
 void WindowsVirtualMic::OpenSoundControlPanel() {
   ::ShellExecuteW(nullptr, L"open", L"control", L"mmsys.cpl,,1", nullptr,
                   SW_SHOWNORMAL);

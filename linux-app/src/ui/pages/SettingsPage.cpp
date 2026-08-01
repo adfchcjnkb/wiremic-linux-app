@@ -2,18 +2,19 @@
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMessageBox>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
 #include "../components/GlassButton.hpp"
 #include "../components/GlassPanel.hpp"
 #include "../components/ToggleSwitch.hpp"
+#include "DefaultMicControl.hpp"
 
 #ifdef _WIN32
-#include <QMessageBox>
 #include <QPointer>
-#include <QSettings>
 
 #include "WindowsFirewall.hpp"
 #include "WindowsVirtualMic.hpp"
@@ -144,6 +145,7 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
   rememberTrustedSwitch_->setChecked(true, false);
 
   rootLayout->addWidget(settingsCard);
+  rootLayout->addWidget(buildMicrophoneCard(content));
 
 #ifdef _WIN32
   rootLayout->addWidget(buildWindowsCard(content));
@@ -214,11 +216,9 @@ void SettingsPage::setTrustedDevices(const QStringList& ids,
   emptyLabel_->setVisible(ids.isEmpty());
 }
 
-#ifdef _WIN32
-
 namespace {
 
-constexpr const char* kPreviousMicKey = "windows/previousDefaultCaptureId";
+constexpr const char* kPreviousMicKey = "audio/previousDefaultMicrophone";
 
 QLabel* MakeStatusLabel(QWidget* parent) {
   auto* label = new QLabel(parent);
@@ -229,23 +229,24 @@ QLabel* MakeStatusLabel(QWidget* parent) {
 
 }
 
-// Everything Windows needs is two buttons and a sentence of status. The
-// underlying operations -- switching the default capture endpoint, adding
-// firewall rules -- are the ones people otherwise have to do by hand in two
-// different control panels.
-QWidget* SettingsPage::buildWindowsCard(QWidget* parent) {
+// Publishing the microphone is only half the job. Plenty of programs never ask
+// which microphone to use -- they take whatever the system calls the default --
+// and on Linux anything going through ALSA reaches the audio server the same
+// way. Handing them the default is what makes WireMic work in every one of
+// them instead of only the ones with a device picker.
+QWidget* SettingsPage::buildMicrophoneCard(QWidget* parent) {
   auto* card = new GlassPanel(parent);
   auto* layout = new QVBoxLayout(card);
   layout->setContentsMargins(20, 18, 20, 18);
   layout->setSpacing(12);
 
-  auto* title = new QLabel("Windows", card);
+  auto* title = new QLabel("Microphone", card);
   title->setStyleSheet(
       "color: rgb(245,246,250); font-size: 16px; font-weight: 700;");
   layout->addWidget(title);
 
-  cableStatusLabel_ = MakeStatusLabel(card);
-  layout->addWidget(cableStatusLabel_);
+  micStatusLabel_ = MakeStatusLabel(card);
+  layout->addWidget(micStatusLabel_);
 
   // One action per line. Three long labels sharing a row left every one of them
   // too narrow to read, and at the window sizes people actually use they ran
@@ -265,43 +266,56 @@ QWidget* SettingsPage::buildWindowsCard(QWidget* parent) {
   restoreMicButton_ =
       new GlassButton("Restore previous", GlassButton::Variant::Secondary,
                       secondaryRow);
+  secondaryLayout->addWidget(restoreMicButton_, 1);
+
+#ifdef _WIN32
   auto* openPanel = new GlassButton("Sound settings",
                                      GlassButton::Variant::Secondary,
                                      secondaryRow);
-  secondaryLayout->addWidget(restoreMicButton_, 1);
   secondaryLayout->addWidget(openPanel, 1);
+  connect(openPanel, &GlassButton::clicked, this, []() {
+    platform::WindowsVirtualMic::OpenSoundControlPanel();
+  });
+#endif
+
   layout->addWidget(secondaryRow);
-
-  firewallStatusLabel_ = MakeStatusLabel(card);
-  layout->addWidget(firewallStatusLabel_);
-
-  auto* repair = new GlassButton("Repair network permissions",
-                                  GlassButton::Variant::Secondary, card);
-  repair->setMinimumHeight(46);
-  layout->addWidget(repair);
 
   connect(makeDefault, &GlassButton::clicked, this,
           [this]() { makeVirtualMicDefault(); });
   connect(restoreMicButton_, &GlassButton::clicked, this,
           [this]() { restorePreviousMic(); });
-  connect(openPanel, &GlassButton::clicked, this, []() {
-    platform::WindowsVirtualMic::OpenSoundControlPanel();
-  });
-  connect(repair, &GlassButton::clicked, this, [this]() { repairFirewall(); });
 
-  refreshWindowsStatus();
+  refreshMicrophoneStatus();
   return card;
 }
 
-void SettingsPage::refreshWindowsStatus() {
-  if (cableStatusLabel_) {
-    cableStatusLabel_->setText(
-        platform::WindowsVirtualMic::IsCableInstalled()
-            ? "Virtual microphone ready. Any application can pick "
-              "\"CABLE Output\", or let WireMic make it the default."
-            : "The VB-CABLE virtual audio device is not installed, so no "
-              "application can hear WireMic yet. Re-run the WireMic installer "
-              "to add it.");
+void SettingsPage::refreshMicrophoneStatus() {
+  if (micStatusLabel_) {
+    QString text;
+#ifdef _WIN32
+    if (!platform::WindowsVirtualMic::IsCableInstalled()) {
+      text =
+          "The VB-CABLE virtual audio device is not installed, so no "
+          "application can hear WireMic yet. Re-run the WireMic installer to "
+          "add it.";
+    } else
+#endif
+        if (!platform::DefaultMicControl::IsSupported()) {
+      text =
+          "No audio server is running, so the microphone cannot be published "
+          "yet.";
+    } else if (platform::DefaultMicControl::WireMicIsDefault()) {
+      text =
+          "WireMic is the default microphone. Programs that do not offer a "
+          "choice of microphone will use it, and the ones that do can pick it "
+          "by name.";
+    } else {
+      text =
+          "WireMic is published as a microphone and can be chosen by name. "
+          "Programs that never ask which microphone to use need it to be the "
+          "default one.";
+    }
+    micStatusLabel_->setText(text);
   }
 
   if (restoreMicButton_) {
@@ -310,6 +324,7 @@ void SettingsPage::refreshWindowsStatus() {
         !stored.value(QLatin1String(kPreviousMicKey)).toString().isEmpty());
   }
 
+#ifdef _WIN32
   if (!firewallStatusLabel_) return;
   firewallStatusLabel_->setText("Checking network permissions...");
 
@@ -336,25 +351,17 @@ void SettingsPage::refreshWindowsStatus() {
             break;
         }
       });
+#endif
 }
 
 void SettingsPage::makeVirtualMicDefault() {
-  if (!platform::WindowsVirtualMic::IsCableInstalled()) {
-    QMessageBox::warning(
-        this, "Virtual microphone missing",
-        "The VB-CABLE virtual audio device is not installed. Re-run the "
-        "WireMic installer and keep the virtual microphone option ticked.");
-    return;
-  }
-
   std::string previous;
   std::string error;
-  if (!platform::WindowsVirtualMic::MakeCableDefaultCaptureDevice(&previous,
-                                                                   &error)) {
+  if (!platform::DefaultMicControl::MakeWireMicDefault(&previous, &error)) {
     QMessageBox::warning(
         this, "Could not change the default microphone",
         QString::fromStdString(
-            error.empty() ? "Windows refused the change." : error));
+            error.empty() ? "The system refused the change." : error));
     return;
   }
 
@@ -368,7 +375,7 @@ void SettingsPage::makeVirtualMicDefault() {
                     QString::fromStdString(previous));
   }
 
-  refreshWindowsStatus();
+  refreshMicrophoneStatus();
 }
 
 void SettingsPage::restorePreviousMic() {
@@ -378,19 +385,50 @@ void SettingsPage::restorePreviousMic() {
   if (previous.isEmpty()) return;
 
   std::string error;
-  if (!platform::WindowsVirtualMic::SetDefaultCaptureById(
-          previous.toStdString(), &error)) {
+  if (!platform::DefaultMicControl::RestoreDefault(previous.toStdString(),
+                                                    &error)) {
     QMessageBox::warning(
         this, "Could not restore the microphone",
         QString::fromStdString(
             error.empty() ? "That microphone is no longer available." : error) +
-            "\n\nYou can pick one yourself in the Windows sound settings.");
+            "\n\nYou can pick one yourself in your system's sound settings.");
     return;
   }
 
   stored.remove(QLatin1String(kPreviousMicKey));
-  refreshWindowsStatus();
+  refreshMicrophoneStatus();
 }
+
+#ifdef _WIN32
+
+// Windows drops unsolicited inbound datagrams without telling anyone, which
+// looks exactly like the phone not being on the network at all.
+QWidget* SettingsPage::buildWindowsCard(QWidget* parent) {
+  auto* card = new GlassPanel(parent);
+  auto* layout = new QVBoxLayout(card);
+  layout->setContentsMargins(20, 18, 20, 18);
+  layout->setSpacing(12);
+
+  auto* title = new QLabel("Network permissions", card);
+  title->setStyleSheet(
+      "color: rgb(245,246,250); font-size: 16px; font-weight: 700;");
+  layout->addWidget(title);
+
+  firewallStatusLabel_ = MakeStatusLabel(card);
+  layout->addWidget(firewallStatusLabel_);
+
+  auto* repair = new GlassButton("Repair network permissions",
+                                  GlassButton::Variant::Secondary, card);
+  repair->setMinimumHeight(46);
+  layout->addWidget(repair);
+
+  connect(repair, &GlassButton::clicked, this, [this]() { repairFirewall(); });
+
+  refreshWindowsStatus();
+  return card;
+}
+
+void SettingsPage::refreshWindowsStatus() { refreshMicrophoneStatus(); }
 
 void SettingsPage::repairFirewall() {
   QString error;

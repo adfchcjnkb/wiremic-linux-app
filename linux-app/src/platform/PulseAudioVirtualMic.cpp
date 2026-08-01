@@ -38,8 +38,8 @@ uint32_t BufferFramesFor(uint32_t windowMs, uint8_t frameSizeMs,
 
 PulseAudioVirtualMic::PulseAudioVirtualMic(const VirtualMicConfig& config)
     : config_(config),
-      sinkName_("wiremic_null_sink"),
-      sourceName_("wiremic_virtual_mic") {}
+      sinkName_(kPulseSinkName),
+      sourceName_(kPulseSourceName) {}
 
 PulseAudioVirtualMic::~PulseAudioVirtualMic() {
     stop();
