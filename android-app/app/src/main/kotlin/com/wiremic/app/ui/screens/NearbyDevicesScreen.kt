@@ -45,84 +45,92 @@ fun NearbyDevicesScreen(
 ) {
     var address by remember { mutableStateOf("") }
 
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text("Nearby Devices", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("Computers found on your network", color = TextSecondary, fontSize = 12.sp)
+    // Everything is one scrolling list, header included. On a short phone with
+    // the keyboard up there is very little room left, and a fixed header above a
+    // list would leave the address field with nowhere to go.
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Nearby Devices", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text("Computers found on your network", color = TextSecondary, fontSize = 12.sp)
+                }
+                SecondaryButton(text = "Refresh", onClick = onRefresh)
             }
-            SecondaryButton(text = "Refresh", onClick = onRefresh)
         }
-
-        Spacer(modifier = Modifier.height(14.dp))
 
         // Kept on the same screen rather than hidden in settings: when discovery
         // fails this is the only way through, and it is no help to anyone if it
         // is somewhere they would have to already know to look.
-        GlassCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    "Not showing up?",
-                    color = TextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    "Type the address shown on your computer's WireMic window.",
-                    color = TextSecondary,
-                    fontSize = 12.sp
-                )
+        item {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        "Not showing up?",
+                        color = TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Type the address shown on your computer's WireMic window.",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = { address = it },
-                    singleLine = true,
-                    placeholder = { Text("192.168.1.20", color = TextSecondary) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                    OutlinedTextField(
+                        value = address,
+                        onValueChange = { address = it },
+                        singleLine = true,
+                        placeholder = { Text("192.168.1.20", color = TextSecondary) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                PrimaryButton(
-                    text = "Connect to this address",
-                    onClick = { onConnectToAddress(address) },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                    PrimaryButton(
+                        text = "Connect to this address",
+                        onClick = { onConnectToAddress(address) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
-                if (manualStatus != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(manualStatus, color = TextSecondary, fontSize = 12.sp)
+                    if (manualStatus != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(manualStatus, color = TextSecondary, fontSize = 12.sp)
+                    }
                 }
             }
         }
 
         if (devices.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No devices found yet", color = TextSecondary, fontSize = 13.sp)
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No devices found yet", color = TextSecondary, fontSize = 13.sp)
+                }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(top = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(devices, key = { it.id }) { device ->
-                    DeviceRow(
-                        device = device,
-                        busy = connectingDeviceId == device.id,
-                        onConnect = { onConnect(device.id) }
-                    )
-                }
+            items(devices, key = { it.id }) { device ->
+                DeviceRow(
+                    device = device,
+                    busy = connectingDeviceId == device.id,
+                    onConnect = { onConnect(device.id) }
+                )
             }
         }
     }

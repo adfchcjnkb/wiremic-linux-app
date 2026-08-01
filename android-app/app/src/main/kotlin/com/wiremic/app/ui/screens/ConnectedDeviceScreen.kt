@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -28,15 +30,25 @@ fun ConnectedDeviceScreen(
     connectionState: String,
     onDisconnect: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+    // Scrolls rather than clipping: short screens, landscape, and large system
+    // font sizes all make this content taller than the window it is given.
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp)
+    ) {
         Text("Connected Device", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
 
         androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(20.dp))
 
         if (activeDevice == null) {
-            GlassCard(modifier = Modifier.fillMaxWidth().fillMaxSize()) {
+            // Sized, not stretched: this sits inside a scrolling column now, and
+            // a child that asks to fill the remaining height has no height to
+            // fill when that height is unbounded.
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
                 ) {

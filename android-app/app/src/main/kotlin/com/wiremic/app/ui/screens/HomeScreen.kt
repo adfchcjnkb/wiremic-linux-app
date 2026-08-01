@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,7 +33,14 @@ fun HomeScreen(
 ) {
     val connected = activeDevice != null
 
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+    // Scrolls rather than clipping: short screens, landscape, and large system
+    // font sizes all make this content taller than the window it is given.
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp)
+    ) {
         Text("WireMic", color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Text(
             "Turn this phone into a wireless microphone",

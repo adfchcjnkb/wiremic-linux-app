@@ -206,7 +206,8 @@ bool PulseAudioVirtualMic::loadModules() {
          << " rate=" << config_.sampleRate
          << " channels=" << static_cast<unsigned>(config_.channels)
          << " format=s16le"
-         << " sink_properties=device.description=WireMic_Virtual_Sink 2>/dev/null";
+         << " sink_properties=device.description=WireMic_Virtual_Sink"
+            " 2>/dev/null";
 
     if (!runPactlCommand(cmd1.str(), output)) {
         std::cerr << "Failed to run pactl for null sink" << std::endl;
@@ -219,10 +220,26 @@ bool PulseAudioVirtualMic::loadModules() {
         return false;
     }
 
+    // device.class matters more than it looks. A remapped source inherits
+    // "filter" from its master, and every UI that asks someone to choose a
+    // microphone -- the GNOME and KDE sound panels, Telegram, conferencing apps
+    // -- lists only sources classed as "sound" and hides the rest. That is why
+    // this device turned up in a browser, which enumerates everything, and
+    // nowhere else. Calling it "sound" is not a fiction either: to anything
+    // recording from it, this is a microphone, and the icon and form factor
+    // make it look like one in the places that draw pictures.
+    //
+    // The value has to arrive as one argument with the quotes intact, because
+    // pactl splits its arguments on spaces before PulseAudio ever parses the
+    // property list. That also rules out spaces inside any single value, which
+    // is why the description is spelled with underscores.
     std::ostringstream cmd2;
     cmd2 << "pactl load-module module-remap-source master=" << sinkName_
          << ".monitor source_name=" << sourceName_
-         << " source_properties=device.description=WireMic_Virtual_Microphone 2>/dev/null";
+         << " source_properties='\"device.description=WireMic_Virtual_Microphone"
+            " device.class=sound"
+            " device.icon_name=audio-input-microphone"
+            " device.form_factor=microphone\"' 2>/dev/null";
 
     if (!runPactlCommand(cmd2.str(), output)) {
         std::cerr << "Failed to run pactl for remap source" << std::endl;
