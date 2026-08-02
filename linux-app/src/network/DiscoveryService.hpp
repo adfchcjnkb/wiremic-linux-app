@@ -46,6 +46,7 @@ class DiscoveryService : public QObject {
  private:
   struct LanInterface {
     QString name;
+    int index{0};
     QHostAddress address;
     QHostAddress broadcast;
   };

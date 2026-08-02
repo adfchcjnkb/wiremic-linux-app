@@ -33,7 +33,14 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
 
     private var started = false
     private var multicastLock: WifiManager.MulticastLock? = null
-    private val networkBinder = NetworkBinder(application)
+    private val networkBinder = NetworkBinder(application) {
+        // The socket has to be reopened on the new network, and anything found
+        // over the old one is no longer reachable, so the list starts again.
+        if (started) {
+            _devices.value = emptyList()
+            NativeBridge.nativeRefreshDiscovery()
+        }
+    }
 
     fun start() {
         if (started) return

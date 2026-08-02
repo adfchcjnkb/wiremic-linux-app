@@ -272,7 +272,14 @@ void ConnectionManager::disconnectActive() {
   setState(protocol::ConnectionState::Idle);
 }
 
-void ConnectionManager::refreshDiscovery() {}
+// Was empty, which meant the "Refresh" button did nothing at all. Reopening the
+// socket is the one thing that actually helps: a socket belongs to the network
+// it was created on for its whole life, so after a VPN comes up or goes down,
+// or the phone moves between Wi-Fi and tethering, the old one is still bound to
+// a network that may no longer reach the computer.
+void ConnectionManager::refreshDiscovery() {
+  if (discovery_) discovery_->requestRebind();
+}
 
 bool ConnectionManager::probeHost(const std::string& host) {
   if (!discovery_) return false;

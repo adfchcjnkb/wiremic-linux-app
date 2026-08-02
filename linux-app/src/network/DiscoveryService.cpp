@@ -18,9 +18,17 @@ constexpr int kSweepIntervalMs = 1000;
 constexpr int kRebindIntervalMs = 1000;
 
 bool IsTunnelInterface(const QNetworkInterface& iface) {
+  // The structural test first, because it does not depend on knowing what any
+  // particular VPN calls itself. A tunnel is point-to-point; a local network
+  // that two devices share is not. This catches VPNs nobody thought to list,
+  // which is the only kind that matters -- the list below can only ever name
+  // the ones that were already known when it was written.
+  if (iface.flags().testFlag(QNetworkInterface::IsPointToPoint)) return true;
+
   static const char* const kTunnelPrefixes[] = {
-      "tun", "tap", "wg", "ppp", "ipsec", "utun", "gpd",
-      "nordlynx", "proton", "tailscale", "zt", "vboxnet", "docker"};
+      "tun", "tap", "wg", "ppp", "ipsec", "utun", "gpd", "nordlynx",
+      "proton", "tailscale", "zt", "vboxnet", "docker", "warp", "psiphon",
+      "outline", "mullvad", "clash", "singbox", "sing-box", "v2ray", "xray"};
   for (const char* prefix : kTunnelPrefixes) {
     if (iface.name().startsWith(QLatin1String(prefix), Qt::CaseInsensitive)) {
       return true;
@@ -31,9 +39,12 @@ bool IsTunnelInterface(const QNetworkInterface& iface) {
   // and a VPN would be treated as a LAN. The description is the only readable
   // identifier there.
   static const char* const kTunnelWords[] = {
-      "tap-windows", "tap-nordvpn", "wireguard", "openvpn", "wintun",
+      "tap-windows", "tap-nordvpn", "wireguard", "openvpn",  "wintun",
       "vpn",         "tunnel",      "tailscale", "zerotier", "hyper-v",
-      "virtualbox",  "vmware",      "loopback"};
+      "virtualbox",  "vmware",      "loopback",  "warp",     "cloudflare",
+      "psiphon",     "outline",     "mullvad",   "windscribe", "surfshark",
+      "expressvpn",  "hotspot shield", "proxy",  "singbox",  "sing-box",
+      "v2ray",       "xray",        "hiddify",   "nekoray"};
   const QString description = iface.humanReadableName();
   for (const char* word : kTunnelWords) {
     if (description.contains(QLatin1String(word), Qt::CaseInsensitive)) {
@@ -42,6 +53,41 @@ bool IsTunnelInterface(const QNetworkInterface& iface) {
   }
 
   return false;
+}
+
+// Pins one datagram to the interface it belongs on, so that a VPN holding the
+// default route -- or installing policy routes, which is worse because nothing
+// about the routing table looks wrong afterwards -- cannot quietly carry
+// WireMic's discovery traffic into the tunnel and out of reach of the phone
+// sitting on the same Wi-Fi.
+//
+// Failing to set this is not fatal: the send still happens and the routing
+// table still decides, which is exactly the behaviour there was before. It is
+// worth attempting on every send rather than once, because the option has to
+// name a different interface each time round the loop.
+void PinSendsToInterface(platform::socket_t fd, int interfaceIndex) {
+  if (fd == platform::kInvalidSocket || interfaceIndex <= 0) return;
+
+  const auto index = static_cast<uint32_t>(interfaceIndex);
+#ifdef _WIN32
+  // Winsock wants the index in network byte order for IPv4.
+  const DWORD value = htonl(index);
+#else
+  const uint32_t value = htonl(index);
+#endif
+  ::setsockopt(fd, IPPROTO_IP, IP_UNICAST_IF,
+               platform::AsOptionValue(&value), sizeof(value));
+}
+
+void UnpinSends(platform::socket_t fd) {
+  if (fd == platform::kInvalidSocket) return;
+#ifdef _WIN32
+  const DWORD value = 0;
+#else
+  const uint32_t value = 0;
+#endif
+  ::setsockopt(fd, IPPROTO_IP, IP_UNICAST_IF,
+               platform::AsOptionValue(&value), sizeof(value));
 }
 }
 
@@ -63,6 +109,7 @@ std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
 
       LanInterface lan;
       lan.name = iface.name();
+      lan.index = iface.index();
       lan.address = entry.ip();
       lan.broadcast = entry.broadcast();
 
@@ -300,12 +347,22 @@ bool DiscoveryService::sendToInterface(const QByteArray& bytes,
                                         const LanInterface& lan) {
   bool sentAny = false;
 
+  const auto fd = static_cast<platform::socket_t>(socket_.socketDescriptor());
+  PinSendsToInterface(fd, lan.index);
+
   if (!lan.broadcast.isNull()) {
     sentAny = socket_.writeDatagram(bytes, lan.broadcast,
                                      protocol::kDiscoveryBroadcastPort) >= 0;
   }
 
-  const auto fd = static_cast<platform::socket_t>(socket_.socketDescriptor());
+  // 255.255.255.255 as well as the subnet address, once per interface rather
+  // than once in total. Some access points forward one and drop the other, and
+  // left to the routing table this one would leave by whichever interface holds
+  // the default route -- which, with a VPN connected, is the tunnel.
+  sentAny = socket_.writeDatagram(bytes, QHostAddress::Broadcast,
+                                   protocol::kDiscoveryBroadcastPort) >= 0 ||
+             sentAny;
+
   if (fd != platform::kInvalidSocket) {
     in_addr egress{};
     egress.s_addr = htonl(lan.address.toIPv4Address());
@@ -330,9 +387,10 @@ bool DiscoveryService::broadcast(const QByteArray& bytes) {
     sentAny = sendToInterface(bytes, lan) || sentAny;
   }
 
-  sentAny = socket_.writeDatagram(bytes, QHostAddress::Broadcast,
-                                   protocol::kDiscoveryBroadcastPort) >= 0 ||
-             sentAny;
+  // Replies to a specific peer must go back to routing, which knows how to
+  // reach that one address; leaving the socket pinned to whichever interface
+  // happened to be last in the loop would send them somewhere arbitrary.
+  UnpinSends(static_cast<platform::socket_t>(socket_.socketDescriptor()));
 
   return sentAny;
 }

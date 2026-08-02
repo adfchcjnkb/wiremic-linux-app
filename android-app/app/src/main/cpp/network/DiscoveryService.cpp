@@ -15,14 +15,40 @@ namespace wiremic::android {
 namespace {
 constexpr int kSocketTimeoutMs = 200;
 
-bool IsTunnelInterface(const char* name) {
-  static const char* const kTunnelPrefixes[] = {"tun",  "tap",       "ppp",
-                                                 "ipsec", "nordlynx", "wg",
-                                                 "rmnet_ims", "clat"};
+bool IsTunnelInterface(const char* name, unsigned int flags) {
+  // The structural test first, because it does not depend on knowing what any
+  // particular VPN calls itself. A tunnel is point-to-point; a local network
+  // two devices share is not. Every VPN app on the phone -- and there are more
+  // of them than any list could keep up with -- produces a point-to-point
+  // interface, so this catches the ones nobody thought to name below.
+  if ((flags & IFF_POINTOPOINT) != 0) return true;
+
+  static const char* const kTunnelPrefixes[] = {
+      "tun",   "tap",     "ppp",     "ipsec",   "nordlynx", "wg",
+      "rmnet_ims", "clat", "warp",   "psiphon", "outline",  "v2ray",
+      "xray",  "hiddify", "singbox", "sing-box"};
   for (const char* prefix : kTunnelPrefixes) {
     if (std::strncmp(name, prefix, std::strlen(prefix)) == 0) return true;
   }
   return false;
+}
+
+// Pins one datagram to the interface it belongs on, so a VPN holding the
+// default route cannot carry discovery traffic into the tunnel and away from
+// the computer sitting on the same Wi-Fi. Failing is not fatal: the send still
+// happens and routing still decides, exactly as before.
+void PinSendsToInterface(int socketFd, const char* interfaceName) {
+  if (socketFd < 0 || interfaceName == nullptr) return;
+  const unsigned int index = if_nametoindex(interfaceName);
+  if (index == 0) return;
+  const uint32_t value = htonl(index);
+  setsockopt(socketFd, IPPROTO_IP, IP_UNICAST_IF, &value, sizeof(value));
+}
+
+void UnpinSends(int socketFd) {
+  if (socketFd < 0) return;
+  const uint32_t value = 0;
+  setsockopt(socketFd, IPPROTO_IP, IP_UNICAST_IF, &value, sizeof(value));
 }
 }
 
@@ -37,7 +63,10 @@ std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
     if ((it->ifa_flags & IFF_UP) == 0) continue;
     if ((it->ifa_flags & IFF_RUNNING) == 0) continue;
     if ((it->ifa_flags & IFF_LOOPBACK) != 0) continue;
-    if (it->ifa_name == nullptr || IsTunnelInterface(it->ifa_name)) continue;
+    if (it->ifa_name == nullptr ||
+        IsTunnelInterface(it->ifa_name, it->ifa_flags)) {
+      continue;
+    }
 
     LanInterface lan;
     lan.name = it->ifa_name;
@@ -106,8 +135,8 @@ void DiscoveryService::setInviteCallback(InviteCallback callback) {
   inviteCallback_ = std::move(callback);
 }
 
-bool DiscoveryService::start() {
-  if (running_) return true;
+bool DiscoveryService::openSocket() {
+  closeSocket();
 
   socketFd_ = socket(AF_INET, SOCK_DGRAM, 0);
   if (socketFd_ < 0) return false;
@@ -147,21 +176,33 @@ bool DiscoveryService::start() {
 
   joinedInterfaces_.clear();
   refreshMulticastMemberships();
+  return true;
+}
+
+void DiscoveryService::closeSocket() {
+  if (socketFd_ >= 0) {
+    close(socketFd_);
+    socketFd_ = -1;
+  }
+  joinedInterfaces_.clear();
+}
+
+bool DiscoveryService::start() {
+  if (running_) return true;
+  if (!openSocket()) return false;
 
   running_ = true;
   thread_ = std::thread(&DiscoveryService::run, this);
   return true;
 }
 
+void DiscoveryService::requestRebind() { rebindRequested_ = true; }
+
 void DiscoveryService::stop() {
   if (!running_) return;
   running_ = false;
   if (thread_.joinable()) thread_.join();
-  if (socketFd_ >= 0) {
-    close(socketFd_);
-    socketFd_ = -1;
-  }
-  joinedInterfaces_.clear();
+  closeSocket();
   std::lock_guard<std::mutex> lock(mutex_);
   devices_.clear();
 }
@@ -171,6 +212,8 @@ void DiscoveryService::sendDatagram(int socketFd,
   const auto interfaces = LanInterfaces();
 
   for (const auto& lan : interfaces) {
+    PinSendsToInterface(socketFd, lan.name.c_str());
+
     struct sockaddr_in destination {};
     destination.sin_family = AF_INET;
     destination.sin_port = htons(protocol::kDiscoveryBroadcastPort);
@@ -181,6 +224,15 @@ void DiscoveryService::sendDatagram(int socketFd,
              reinterpret_cast<struct sockaddr*>(&destination),
              sizeof(destination));
     }
+
+    // 255.255.255.255 per interface rather than once in total: some access
+    // points forward one form of broadcast and drop the other, and left to the
+    // routing table this would leave by whichever interface holds the default
+    // route -- the tunnel, whenever a VPN is connected.
+    destination.sin_addr.s_addr = INADDR_BROADCAST;
+    sendto(socketFd, payload.data(), payload.size(), 0,
+           reinterpret_cast<struct sockaddr*>(&destination),
+           sizeof(destination));
 
     struct in_addr egress {};
     egress.s_addr = lan.address;
@@ -194,12 +246,10 @@ void DiscoveryService::sendDatagram(int socketFd,
     }
   }
 
-  struct sockaddr_in fallback {};
-  fallback.sin_family = AF_INET;
-  fallback.sin_port = htons(protocol::kDiscoveryBroadcastPort);
-  fallback.sin_addr.s_addr = INADDR_BROADCAST;
-  sendto(socketFd, payload.data(), payload.size(), 0,
-         reinterpret_cast<struct sockaddr*>(&fallback), sizeof(fallback));
+  // Replies to one specific peer go back to routing, which knows how to reach
+  // that address; leaving the socket pinned to whichever interface was last in
+  // the loop would send them somewhere arbitrary.
+  UnpinSends(socketFd);
 }
 
 void DiscoveryService::sendAnnounce(int socketFd) const {
@@ -331,6 +381,20 @@ void DiscoveryService::run() {
 
   while (running_) {
     const auto now = std::chrono::steady_clock::now();
+
+    // Reopened here rather than wherever the request came from, so the socket
+    // is only ever created and destroyed by the thread that reads from it.
+    if (rebindRequested_.exchange(false)) {
+      if (openSocket()) {
+        lastAnnounce = now - std::chrono::milliseconds(
+                                  protocol::kAnnounceIntervalMs);
+      }
+    }
+    if (socketFd_ < 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(kSocketTimeoutMs));
+      rebindRequested_ = true;
+      continue;
+    }
 
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastAnnounce)
             .count() >= protocol::kAnnounceIntervalMs) {

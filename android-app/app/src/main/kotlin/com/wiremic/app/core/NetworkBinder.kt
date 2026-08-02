@@ -21,7 +21,19 @@ import java.net.NetworkInterface
  * So the rule is: bind only while a VPN is up, and never while the phone is
  * sharing its own connection.
  */
-class NetworkBinder(context: Context) {
+class NetworkBinder(
+    context: Context,
+    /**
+     * Called whenever the network the process is pinned to actually changes.
+     *
+     * Binding the process only affects sockets opened afterwards, so discovery's
+     * socket -- opened when the app started -- keeps whatever network it was
+     * created on. When a VPN comes up or goes down under a running app, that is
+     * a socket bound to a network that may no longer reach anything, and no
+     * amount of waiting fixes it. It has to be reopened.
+     */
+    private val onBoundNetworkChanged: () -> Unit = {}
+) {
     private val connectivityManager =
         context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE)
             as ConnectivityManager
@@ -131,5 +143,6 @@ class NetworkBinder(context: Context) {
             want
         }
         runCatching { connectivityManager.bindProcessToNetwork(desired) }
+        runCatching { onBoundNetworkChanged() }
     }
 }
