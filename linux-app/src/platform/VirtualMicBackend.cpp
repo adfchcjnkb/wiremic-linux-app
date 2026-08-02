@@ -116,23 +116,40 @@ std::vector<AudioServerKind> DetectAllAudioServers() {
     kinds.push_back(AudioServerKind::WindowsCable);
   }
 #else
-  // Publish on exactly one server. Two virtual microphones with the same name
-  // is the worst outcome for the person picking one from a browser dropdown:
-  // they have no way to tell which of the two carries audio, and picking wrong
-  // looks like the app is broken.
+  // How many servers to publish on is a question about how many *graphs* there
+  // are, not how many daemons are running.
   //
-  // The PulseAudio path is the one to prefer whenever a pulse socket answers,
-  // whether that is a real daemon or pipewire-pulse. Its null-sink + remapped
-  // source is a first-class device to every client, and the session manager
-  // links it without any cooperation from us. The native PipeWire source is
-  // only worth publishing when there is no pulse socket at all.
+  // When pipewire-pulse answers the pulse socket there is one graph behind two
+  // doors: publishing through the pulse door puts the device in the PipeWire
+  // graph as well, and publishing twice would put two identically named
+  // microphones in front of someone who has no way to tell them apart.
+  //
+  // A real PulseAudio daemon with a separate PipeWire daemon beside it is a
+  // different machine entirely: two graphs that cannot see each other, with
+  // applications living in both. libpulse clients reach PulseAudio, while
+  // anything going through ALSA reaches PipeWire, since pipewire-alsa claims
+  // the default PCM. Publishing on one server there means half the programs on
+  // the machine cannot find the microphone at all -- and because each
+  // application only ever sees one of the two graphs, publishing on both is
+  // still exactly one microphone from where anybody is standing.
   const auto flavour = PulseAudioVirtualMic::QueryServerFlavour();
+  const bool pipeWireRunning = PipeWireVirtualMic::IsPipeWireAvailable();
 
-  if (flavour != PulseAudioVirtualMic::ServerFlavour::None ||
-      PulseAudioVirtualMic::IsPulseAudioAvailable()) {
-    kinds.push_back(AudioServerKind::PulseAudio);
-  } else if (PipeWireVirtualMic::IsPipeWireAvailable()) {
-    kinds.push_back(AudioServerKind::PipeWire);
+  switch (flavour) {
+    case PulseAudioVirtualMic::ServerFlavour::PipeWirePulse:
+      kinds.push_back(AudioServerKind::PulseAudio);
+      break;
+    case PulseAudioVirtualMic::ServerFlavour::PulseAudio:
+      kinds.push_back(AudioServerKind::PulseAudio);
+      if (pipeWireRunning) kinds.push_back(AudioServerKind::PipeWire);
+      break;
+    case PulseAudioVirtualMic::ServerFlavour::None:
+      if (pipeWireRunning) {
+        kinds.push_back(AudioServerKind::PipeWire);
+      } else if (PulseAudioVirtualMic::IsPulseAudioAvailable()) {
+        kinds.push_back(AudioServerKind::PulseAudio);
+      }
+      break;
   }
 #endif
 
