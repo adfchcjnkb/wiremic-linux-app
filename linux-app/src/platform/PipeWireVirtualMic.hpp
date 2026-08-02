@@ -55,6 +55,8 @@ class PipeWireVirtualMic {
   std::atomic<uint64_t> writeCount_{0};
   std::atomic<uint64_t> readCount_{0};
   size_t maxBufferedSamples_{0};
+  size_t cushionSamples_{0};
+  bool primed_{false};
   bool running_{false};
 
   // Filled in by param_changed once the server has picked a format. Until then

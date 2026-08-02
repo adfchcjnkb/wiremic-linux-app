@@ -18,10 +18,16 @@
 namespace wiremic::platform {
 
 namespace {
-constexpr uint32_t kTargetBufferMs = 40;
-constexpr uint32_t kMinTargetBufferFrames = 3;
-constexpr uint32_t kQueueBufferMs = 40;
+constexpr uint32_t kTargetBufferMs = 80;
+constexpr uint32_t kMinTargetBufferFrames = 4;
+constexpr uint32_t kQueueBufferMs = 80;
 constexpr size_t kMinQueuedFrames = 4;
+
+// How much audio the server holds before it starts playing, and refills to
+// after any interruption. Small enough not to be heard as delay, large enough
+// that a late frame is absorbed instead of leaving a hole.
+constexpr uint32_t kCushionMs = 40;
+constexpr uint32_t kMinCushionFrames = 2;
 
 std::atomic<bool>& InstanceActive() {
     static std::atomic<bool> active{false};
@@ -314,10 +320,28 @@ bool PulseAudioVirtualMic::start() {
     pa_buffer_attr attr{};
     const uint32_t targetFrames = BufferFramesFor(
         kTargetBufferMs, config_.frameSizeMs, kMinTargetBufferFrames);
+    const uint32_t cushionFrames = BufferFramesFor(
+        kCushionMs, config_.frameSizeMs, kMinCushionFrames);
 
+    // prebuf is what keeps this stream alive and smooth, and it does both jobs
+    // better than anything this side of the socket can.
+    //
+    // Alive: with prebuf at zero the server drains the stream whether or not
+    // anything is being written, so the write position falls behind the read
+    // position during any quiet stretch and every sample handed over afterwards
+    // arrives stamped in the past and is dropped. The stream stays open, the
+    // writes report success, and nothing is ever heard again -- which is what a
+    // microphone published at launch and spoken into ten minutes later looked
+    // like. With prebuf set, the server simply stops until there is audio again.
+    //
+    // Smooth: after any underrun the server refills to prebuf before resuming,
+    // so playback restarts with a cushion instead of on the edge of running dry.
+    // Frames arrive over a network and are handed on by a timer, neither of
+    // which is punctual, and at a 10 ms frame size the margin was thin enough
+    // that ordinary lateness was audible as crackling.
     attr.maxlength = frameBytes * targetFrames * 3;
     attr.tlength = frameBytes * targetFrames;
-    attr.prebuf = 0;
+    attr.prebuf = frameBytes * cushionFrames;
     attr.minreq = frameBytes;
     attr.fragsize = static_cast<uint32_t>(-1);
 
@@ -367,47 +391,31 @@ void PulseAudioVirtualMic::stop() {
     if (wasRunning) InstanceActive().store(false);
 }
 
-// Writes without a break for as long as the device exists: real audio when
-// there is any, silence when there is not.
+// Hands over what has arrived, and nothing else.
 //
-// This is not politeness, it is the difference between a working microphone and
-// a dead one. A PulseAudio playback stream that is left unwritten does not
-// simply pause -- the server keeps draining it, the stream's write position
-// falls behind the server's read position, and every sample handed over after
-// that is timestamped in the past and thrown away. The stream stays open, the
-// writes all report success, and nothing is ever heard again. What this looked
-// like from the outside was a virtual microphone that appeared in every
-// application's device list, could be selected, and was silent forever, because
-// the desktop app publishes the device at launch and the phone connects minutes
-// later.
-//
-// Nothing waits on a condition variable here on purpose: pa_simple_write blocks
-// until the server has room, which paces this loop at exactly the rate the sink
-// consumes. A timed wait would add its own delay on top of that and let the
-// stream drift behind again, slowly, which is the same failure with a longer
-// fuse.
+// Filling the gaps with silence was tried and was a mistake. A frame arriving a
+// millisecond late is completely ordinary -- it crossed a network and was passed
+// on by a timer -- and writing silence in its place turns that into an audible
+// hole, so the audio crackled at the shorter frame size where late frames are
+// most common. Quiet stretches are the server's business, not this loop's:
+// prebuf tells it to stop rather than run ahead, and to refill a cushion before
+// it starts again.
 void PulseAudioVirtualMic::writerLoop() {
-    const size_t frameSamples =
-        static_cast<size_t>(config_.sampleRate) *
-        std::max<uint8_t>(1, config_.frameSizeMs) / 1000 * config_.channels;
-    const std::vector<int16_t> silence(std::max<size_t>(frameSamples, 1), 0);
-
     while (true) {
         std::vector<int16_t> frame;
         {
-            std::lock_guard<std::mutex> lock(queueMutex_);
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            queueSignal_.wait(lock, [this] {
+                return !queue_.empty() || !writerRunning_;
+            });
             if (!writerRunning_ && queue_.empty()) return;
-            if (!queue_.empty()) {
-                frame = std::move(queue_.front());
-                queue_.pop_front();
-            }
+            frame = std::move(queue_.front());
+            queue_.pop_front();
         }
 
-        const std::vector<int16_t>& payload = frame.empty() ? silence : frame;
-
         int error = 0;
-        if (pa_simple_write(playbackStream_, payload.data(),
-                            payload.size() * sizeof(int16_t), &error) < 0) {
+        if (pa_simple_write(playbackStream_, frame.data(),
+                            frame.size() * sizeof(int16_t), &error) < 0) {
             std::cerr << "Failed to write to PulseAudio: " << pa_strerror(error)
                       << std::endl;
             return;

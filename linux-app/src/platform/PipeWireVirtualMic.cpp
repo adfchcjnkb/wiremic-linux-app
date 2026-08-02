@@ -45,6 +45,11 @@ PipeWireVirtualMic::PipeWireVirtualMic(const VirtualMicConfig& config)
     maxBufferedSamples_ =
         std::max<size_t>(frameSamples * 4, quantumSamples) * config_.channels;
 
+    // 40 ms, same as the PulseAudio path: short enough not to be heard as
+    // delay, long enough to absorb a late frame.
+    cushionSamples_ =
+        static_cast<size_t>(config_.sampleRate) * 40 / 1000 * config_.channels;
+
     pw_init(nullptr, nullptr);
 }
 
@@ -121,6 +126,30 @@ void PipeWireVirtualMic::fillBuffer(void* dst, uint32_t maxFrames,
     if (written - read > maxBufferedSamples_) {
         read = written - maxBufferedSamples_;
         read -= read % sourceChannels;
+    }
+
+    // Wait for a cushion to build before handing anything over, and go back to
+    // waiting whenever it runs out.
+    //
+    // Frames arrive over a network and are handed on by a timer, so they do not
+    // land evenly. Starting to read the instant the first one appears leaves the
+    // ring hovering at empty, and every frame that is a little late becomes a
+    // hole in the audio -- crackling, worst at the shortest frame size, where
+    // there is least slack. Silence for the length of the cushion once is not
+    // noticeable; silence a few milliseconds at a time, repeatedly, is all
+    // anybody hears.
+    if (primed_ && written - read < sourceChannels) primed_ = false;
+    if (!primed_) {
+        if (written - read < cushionSamples_) {
+            std::memset(dst, 0,
+                        static_cast<size_t>(maxFrames) * outChannels *
+                            (format == SPA_AUDIO_FORMAT_F32 ? sizeof(float)
+                                                             : sizeof(int16_t)));
+            readCount_.store(read, std::memory_order_release);
+            outFrames = maxFrames;
+            return;
+        }
+        primed_ = true;
     }
 
     const size_t framesAvailable =
@@ -331,6 +360,7 @@ void PipeWireVirtualMic::stop() {
     negotiatedFormat_.store(0, std::memory_order_relaxed);
     negotiatedChannels_.store(0, std::memory_order_relaxed);
     negotiatedStride_.store(0, std::memory_order_relaxed);
+    primed_ = false;
 }
 
 void PipeWireVirtualMic::pushSamples(const int16_t* interleaved,
