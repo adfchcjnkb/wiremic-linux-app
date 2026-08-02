@@ -68,6 +68,10 @@ class ConnectionManager : public QObject {
   [[nodiscard]] protocol::DeviceInfo peerDevice() const;
   [[nodiscard]] std::vector<security::TrustedDevice> trustedDevices() const;
   [[nodiscard]] quint16 controlPort() const;
+
+  // Plain text describing what discovery is actually doing, for the screen
+  // someone is looking at because their phone has not appeared.
+  [[nodiscard]] QString networkDiagnostics() const;
   void revokeTrust(const std::string& deviceId);
 
   [[nodiscard]] ConnectionManagerSettings settings() const;

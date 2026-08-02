@@ -76,6 +76,28 @@ DevicesPage::DevicesPage(QWidget* parent) : QWidget(parent) {
   addressHint->setStyleSheet("color: rgb(164,168,186); font-size: 11px;");
   addressLayout->addWidget(addressHint);
 
+  // Hidden until asked for. Someone whose phone appears in the list has no use
+  // for any of this, and someone whose phone does not has no other way to find
+  // out whether the problem is the port, the network, or the firewall.
+  auto* diagnosticsToggle = new GlassButton(
+      "Why can't it find my phone?", GlassButton::Variant::Secondary,
+      addressCard);
+  diagnosticsToggle->setMinimumHeight(40);
+  addressLayout->addWidget(diagnosticsToggle);
+
+  diagnosticsLabel_ = new QLabel(addressCard);
+  diagnosticsLabel_->setWordWrap(true);
+  diagnosticsLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  diagnosticsLabel_->setStyleSheet(
+      "color: rgb(164,168,186); font-size: 11px; font-family: monospace;");
+  diagnosticsLabel_->setVisible(false);
+  addressLayout->addWidget(diagnosticsLabel_);
+
+  connect(diagnosticsToggle, &GlassButton::clicked, this, [this]() {
+    diagnosticsLabel_->setVisible(!diagnosticsLabel_->isVisible());
+    if (diagnosticsLabel_->isVisible()) emit diagnosticsRequested();
+  });
+
   rootLayout->addWidget(addressCard);
   refreshLocalAddresses();
 
@@ -142,6 +164,10 @@ void DevicesPage::refreshLocalAddresses() {
           ? QStringLiteral("Not connected to a network")
           : addresses.join(QStringLiteral("   ·   "));
   if (addressLabel_->text() != text) addressLabel_->setText(text);
+}
+
+void DevicesPage::setDiagnosticsText(const QString& text) {
+  if (diagnosticsLabel_) diagnosticsLabel_->setText(text);
 }
 
 void DevicesPage::setStatusMessage(const QString& message) {

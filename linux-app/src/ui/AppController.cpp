@@ -341,6 +341,11 @@ QString AppController::audioBackendName() const {
 
 QString AppController::lastError() const { return lastError_; }
 
+QString AppController::networkDiagnostics() const {
+  if (!manager_) return QStringLiteral("Not started.");
+  return manager_->networkDiagnostics();
+}
+
 void AppController::connectToDevice(const QString& deviceId) {
   if (!manager_) return;
   manager_->requestConnection(deviceId.toStdString());

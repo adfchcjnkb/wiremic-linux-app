@@ -141,6 +141,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   incomingDialog_ = new IncomingRequestDialog(this);
   connect(devicesPage_, &DevicesPage::connectRequested, &controller_, &AppController::connectToDevice);
   connect(devicesPage_, &DevicesPage::refreshRequested, &controller_, &AppController::refreshDevices);
+  connect(devicesPage_, &DevicesPage::diagnosticsRequested, this, [this]() {
+    devicesPage_->setDiagnosticsText(controller_.networkDiagnostics());
+  });
   connect(connectedPage_, &ConnectedDevicePage::disconnectRequested, &controller_, &AppController::disconnectActive);
   connect(settingsPage_, &SettingsPage::autoConnectChanged, &controller_, &AppController::setAutoConnect);
   connect(settingsPage_, &SettingsPage::rememberTrustedChanged, &controller_, &AppController::setRememberTrustedDevices);

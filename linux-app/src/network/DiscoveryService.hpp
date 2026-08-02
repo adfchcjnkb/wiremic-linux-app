@@ -31,6 +31,24 @@ class DiscoveryService : public QObject {
   // same filtering discovery itself uses. Shown on screen so someone whose
   // network is swallowing discovery traffic can type one into their phone.
   [[nodiscard]] static QStringList LocalAddresses();
+
+  // What discovery is actually doing, in the words of the machine rather than a
+  // guess. When a phone and a computer cannot find each other there is nothing
+  // on screen to distinguish a blocked port from a wrong network from an
+  // interface that was filtered out, and every one of those has a different
+  // answer. This is the difference between "it doesn't work" and knowing why.
+  struct Diagnostics {
+    bool bound{false};
+    quint16 port{0};
+    QString bindError;
+    QStringList interfaces;   // "name  address  ->  broadcast"
+    QString skipped;          // interfaces deliberately not used, and why
+    quint64 datagramsSent{0};
+    quint64 datagramsReceived{0};
+    bool lastSendSucceeded{false};
+  };
+  [[nodiscard]] Diagnostics diagnostics() const;
+
  signals:
   void inviteReceived(const protocol::ConnectInvite& invite);
   void deviceDiscovered(const DiscoveredDevice& device);
@@ -70,6 +88,9 @@ class DiscoveryService : public QObject {
   QTimer rebindTimer_;
   std::unordered_map<std::string, DiscoveredDevice> devices_;
   QString bindError_;
+  quint64 datagramsSent_{0};
+  quint64 datagramsReceived_{0};
+  bool lastSendSucceeded_{false};
   bool running_{false};
   bool bound_{false};
 };

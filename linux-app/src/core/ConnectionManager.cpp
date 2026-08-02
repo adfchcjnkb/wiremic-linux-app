@@ -224,6 +224,57 @@ void ConnectionManager::destroyVirtualMic() {
 
 quint16 ConnectionManager::controlPort() const { return controlServer_.port(); }
 
+QString ConnectionManager::networkDiagnostics() const {
+  if (!discovery_) return QStringLiteral("Discovery is not running.");
+
+  const auto report = discovery_->diagnostics();
+  QStringList lines;
+
+  if (!report.bound) {
+    lines << QStringLiteral(
+                 "Discovery could not open UDP port %1%2. Another program may "
+                 "already be using it, or the firewall refused it.")
+                 .arg(protocol::kDiscoveryBroadcastPort)
+                 .arg(report.bindError.isEmpty()
+                          ? QString()
+                          : QStringLiteral(" (%1)").arg(report.bindError));
+  } else {
+    lines << QStringLiteral("Listening on UDP port %1, control port %2.")
+                 .arg(report.port)
+                 .arg(controlServer_.port());
+  }
+
+  if (report.interfaces.isEmpty()) {
+    lines << QStringLiteral(
+        "No usable network connection was found, so nothing is being "
+        "announced. Connect to Wi-Fi or plug in a network cable.");
+  } else {
+    lines << QStringLiteral("Announcing on:");
+    for (const auto& line : report.interfaces) lines << QStringLiteral("   ") + line;
+  }
+
+  if (!report.skipped.isEmpty()) {
+    lines << QStringLiteral("Not used: %1").arg(report.skipped);
+  }
+
+  lines << QStringLiteral("Announcements sent: %1   ·   packets received: %2")
+               .arg(report.datagramsSent)
+               .arg(report.datagramsReceived);
+
+  // The sharpest signal available without a second machine: announcements are
+  // leaving and nothing is coming back. On Windows that is what a firewall
+  // blocking inbound UDP looks like, and it is worth naming rather than leaving
+  // someone to work out from two numbers.
+  if (report.bound && report.datagramsSent > 5 && report.datagramsReceived == 0) {
+    lines << QStringLiteral(
+        "Nothing has arrived from any other device. If your phone is on this "
+        "same network and still does not appear, incoming connections are "
+        "being blocked — repair the network permissions in Settings.");
+  }
+
+  return lines.join(QStringLiteral("\n"));
+}
+
 void ConnectionManager::onDeviceDiscovered(
     const network::DiscoveredDevice& device) {
   auto it = devices_.find(device.info.id);

@@ -135,6 +135,40 @@ std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
   return result;
 }
 
+DiscoveryService::Diagnostics DiscoveryService::diagnostics() const {
+  Diagnostics report;
+  report.bound = bound_ && socket_.state() == QAbstractSocket::BoundState;
+  report.port = socket_.localPort();
+  report.bindError = bindError_;
+  report.datagramsSent = datagramsSent_;
+  report.datagramsReceived = datagramsReceived_;
+  report.lastSendSucceeded = lastSendSucceeded_;
+
+  for (const auto& lan : LanInterfaces()) {
+    report.interfaces
+        << QStringLiteral("%1   %2   →   %3")
+               .arg(lan.name, lan.address.toString(),
+                    lan.broadcast.isNull() ? QStringLiteral("no broadcast address")
+                                            : lan.broadcast.toString());
+  }
+
+  QStringList skipped;
+  for (const auto& iface : QNetworkInterface::allInterfaces()) {
+    const auto flags = iface.flags();
+    if (flags.testFlag(QNetworkInterface::IsLoopBack)) continue;
+    if (!flags.testFlag(QNetworkInterface::IsUp)) {
+      skipped << QStringLiteral("%1 (down)").arg(iface.name());
+    } else if (!flags.testFlag(QNetworkInterface::IsRunning)) {
+      skipped << QStringLiteral("%1 (no link)").arg(iface.name());
+    } else if (IsTunnelInterface(iface)) {
+      skipped << QStringLiteral("%1 (VPN or virtual)").arg(iface.name());
+    }
+  }
+  report.skipped = skipped.join(QStringLiteral(", "));
+
+  return report;
+}
+
 QStringList DiscoveryService::LocalAddresses() {
   QStringList addresses;
   for (const auto& lan : LanInterfaces()) {
@@ -390,7 +424,27 @@ bool DiscoveryService::broadcast(const QByteArray& bytes) {
   // Replies to a specific peer must go back to routing, which knows how to
   // reach that one address; leaving the socket pinned to whichever interface
   // happened to be last in the loop would send them somewhere arbitrary.
-  UnpinSends(static_cast<platform::socket_t>(socket_.socketDescriptor()));
+  const auto fd = static_cast<platform::socket_t>(socket_.socketDescriptor());
+  UnpinSends(fd);
+
+  // Nothing went out. Either no interface survived the filtering, or pinning to
+  // one of them made the sends fail. Both are recoverable by doing the simplest
+  // possible thing and letting the routing table decide -- which is what this
+  // did before any of the interface handling existed, and it worked. Being
+  // undiscoverable is a far worse outcome than announcing on one interface too
+  // many.
+  if (!sentAny) {
+    sentAny = socket_.writeDatagram(bytes, QHostAddress::Broadcast,
+                                     protocol::kDiscoveryBroadcastPort) >= 0;
+    const QHostAddress group(
+        QString::fromLatin1(protocol::kDiscoveryMulticastGroup));
+    sentAny = socket_.writeDatagram(bytes, group,
+                                     protocol::kDiscoveryBroadcastPort) >= 0 ||
+               sentAny;
+  }
+
+  lastSendSucceeded_ = sentAny;
+  if (sentAny) ++datagramsSent_;
 
   return sentAny;
 }
@@ -410,6 +464,7 @@ void DiscoveryService::onReadyRead() {
     QNetworkDatagram datagram = socket_.receiveDatagram(
         static_cast<qint64>(protocol::kMaxDiscoveryPacketBytes));
     if (datagram.isValid()) {
+      ++datagramsReceived_;
       handlePacket(datagram.data(), datagram.senderAddress());
     }
   }

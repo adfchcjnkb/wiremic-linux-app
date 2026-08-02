@@ -17,12 +17,26 @@
 #include <string>
 #include <utility>
 
+#include "Protocol.hpp"
+
 namespace wiremic::platform {
 
 namespace {
 
 constexpr const char* kUdpRule = "WireMic (UDP-In)";
 constexpr const char* kTcpRule = "WireMic (TCP-In)";
+
+// Rules keyed on the ports rather than on this executable's path.
+//
+// A program rule stops matching the moment the program is somewhere else, and
+// that happens constantly: the installed copy, a copy someone moved to another
+// drive, a rebuild, a portable copy on a stick. When it stops matching, nothing
+// says so -- inbound datagrams are simply dropped, and the symptom is a phone
+// that cannot see the computer, which is indistinguishable from every other
+// discovery failure. The port rules are narrow, they are the ports WireMic
+// actually listens on, and they keep working wherever the program lives.
+constexpr const char* kUdpPortRule = "WireMic Discovery (UDP-In)";
+constexpr const char* kTcpPortRule = "WireMic Control (TCP-In)";
 
 QString ExecutablePath() {
   return QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
@@ -108,7 +122,7 @@ bool WindowsFirewall::Repair(QString* error) {
   {
     QTextStream out(&script);
     out << "@echo off\r\n";
-    for (const char* name : {kUdpRule, kTcpRule}) {
+    for (const char* name : {kUdpRule, kTcpRule, kUdpPortRule, kTcpPortRule}) {
       out << "netsh advfirewall firewall delete rule name=\""
           << QLatin1String(name) << "\" >nul 2>&1\r\n";
     }
@@ -120,6 +134,18 @@ bool WindowsFirewall::Repair(QString* error) {
         << QLatin1String(kTcpRule) << "\" dir=in action=allow program=\""
         << target << "\" protocol=TCP profile=any enable=yes\r\n";
     out << "if errorlevel 1 exit /b 1\r\n";
+
+    // The port rules are what survive the program moving. They are added after
+    // the program rules and are not allowed to fail the whole repair on their
+    // own, so an installation where only these apply still ends up reachable.
+    out << "netsh advfirewall firewall add rule name=\""
+        << QLatin1String(kUdpPortRule)
+        << "\" dir=in action=allow protocol=UDP localport="
+        << protocol::kDiscoveryBroadcastPort << " profile=any enable=yes\r\n";
+    out << "netsh advfirewall firewall add rule name=\""
+        << QLatin1String(kTcpPortRule)
+        << "\" dir=in action=allow protocol=TCP localport="
+        << protocol::kDefaultControlPort << " profile=any enable=yes\r\n";
     out << "exit /b 0\r\n";
   }
   script.close();

@@ -17,15 +17,18 @@ class DevicesPage : public QWidget {
   void setDevices(const std::vector<DeviceRowData>& devices);
   void setBusyDeviceId(const QString& deviceId);
   void setStatusMessage(const QString& message);
+  void setDiagnosticsText(const QString& text);
 
  signals:
   void connectRequested(QString deviceId);
   void refreshRequested();
+  void diagnosticsRequested();
 
  private:
   void refreshLocalAddresses();
 
   QLabel* addressLabel_{nullptr};
+  QLabel* diagnosticsLabel_{nullptr};
   QVBoxLayout* listLayout_;
   QWidget* listContainer_;
   QLabel* emptyLabel_;

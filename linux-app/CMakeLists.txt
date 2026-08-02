@@ -85,6 +85,7 @@ target_include_directories(wiremic_platform PUBLIC
 
 target_link_libraries(wiremic_platform PUBLIC
     Qt6::Core
+    wiremic_protocol
     ${WIREMIC_PLATFORM_LIBS}
 )
 
@@ -248,6 +249,21 @@ if(WIN32)
             DESTINATION .)
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/icons/wiremic.ico
             DESTINATION .)
+
+    # Ship the Visual C++ runtime rather than assuming it is already there.
+    #
+    # The dependency scan above deliberately skips anything resolved out of
+    # System32, which is where these end up on a machine that has the
+    # redistributable installed -- every build machine, and most ordinary
+    # installs. The machines where it is missing are exactly the ones this has
+    # to work on: the trimmed Windows builds, and LTSC images that ship without
+    # it. There, the program does not start at all and says only that a DLL was
+    # not found, which no one can act on. These come from the compiler's own
+    # redist directory, not from System32, so they are copied rather than
+    # skipped.
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION .)
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP FALSE)
+    include(InstallRequiredSystemLibraries)
 else()
     install(TARGETS wiremic RUNTIME DESTINATION bin)
     install(FILES resources/icons/app_icon.svg

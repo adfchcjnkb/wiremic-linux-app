@@ -36,6 +36,7 @@ class AppController : public QObject {
   [[nodiscard]] QString lastError() const;
   [[nodiscard]] bool virtualMicActive() const;
   [[nodiscard]] QString audioBackendName() const;
+  [[nodiscard]] QString networkDiagnostics() const;
 
  public slots:
   void connectToDevice(const QString& deviceId);

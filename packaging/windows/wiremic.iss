@@ -188,6 +188,12 @@ begin
   Exec(ExpandConstant('{sys}\netsh.exe'),
        'advfirewall firewall delete rule name="WireMic (TCP-In)"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+       'advfirewall firewall delete rule name="WireMic Discovery (UDP-In)"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+       'advfirewall firewall delete rule name="WireMic Control (TCP-In)"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure AddFirewallRules();
@@ -211,6 +217,21 @@ begin
     'advfirewall firewall add rule name="WireMic (TCP-In)" dir=in action=allow'
     + ' program="' + Target + '" protocol=TCP profile=any enable=yes',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+
+  { Rules on the ports as well as on this executable. A program rule stops
+    matching the moment the program is somewhere else -- moved to another
+    drive, replaced by an update, run as a portable copy -- and when it stops
+    matching, nothing says so: inbound datagrams are simply dropped and the
+    phone can no longer see this computer. These two are narrow, they name the
+    only ports WireMic listens on, and they keep working wherever it lives. }
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+    'advfirewall firewall add rule name="WireMic Discovery (UDP-In)" dir=in'
+    + ' action=allow protocol=UDP localport=47500 profile=any enable=yes',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+    'advfirewall firewall add rule name="WireMic Control (TCP-In)" dir=in'
+    + ' action=allow protocol=TCP localport=47600 profile=any enable=yes',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   if not (UdpOk and TcpOk) then
   begin
