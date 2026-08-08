@@ -11,10 +11,6 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 option(WIREMIC_BUILD_TESTS "Build unit tests" ON)
 
-if(WIN32)
-    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
-endif()
-
 if(WIREMIC_BUILD_TESTS)
     enable_testing()
 endif()

@@ -19,9 +19,7 @@
 #include "ControlServer.hpp"
 #include "DiscoveryService.hpp"
 #include "MonoResampler.hpp"
-#ifndef _WIN32
 #include "PipeWireAudioCapture.hpp"
-#endif
 #include "Protocol.hpp"
 #include "TrustedDeviceStore.hpp"
 #include "VirtualMicBackend.hpp"
@@ -159,9 +157,7 @@ class ConnectionManager : public QObject {
   std::vector<int16_t> micResampled_;
   uint32_t micResamplerInputRate_{0};
   std::unique_ptr<audio::AudioSender> audioSender_;
-#ifndef _WIN32
   std::unique_ptr<platform::PipeWireAudioCapture> audioCapture_;
-#endif
   platform::AudioServerKind audioServerKind_{platform::AudioServerKind::None};
   QString publishedBackends_;
 

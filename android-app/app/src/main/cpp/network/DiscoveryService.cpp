@@ -390,8 +390,12 @@ void DiscoveryService::run() {
                                   protocol::kAnnounceIntervalMs);
       }
     }
+    // A socket that will not open again is worth retrying, but slowly. Retrying
+    // as fast as the loop can spin would burn the battery of a phone whose
+    // network is simply gone, and the situation that fixes it -- the network
+    // coming back -- takes seconds, not milliseconds.
     if (socketFd_ < 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(kSocketTimeoutMs));
+      std::this_thread::sleep_for(std::chrono::seconds(1));
       rebindRequested_ = true;
       continue;
     }

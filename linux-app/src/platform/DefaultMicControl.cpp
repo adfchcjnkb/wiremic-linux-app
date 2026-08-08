@@ -2,43 +2,13 @@
 
 #include "VirtualMicConfig.hpp"
 
-#ifdef _WIN32
-#include "WindowsVirtualMic.hpp"
-#else
 #include <array>
 #include <cstdio>
 #include <sstream>
 #include <vector>
-#endif
 
 namespace wiremic::platform {
 
-#ifdef _WIN32
-
-bool DefaultMicControl::IsSupported() {
-  return WindowsVirtualMic::IsCableInstalled();
-}
-
-std::string DefaultMicControl::CurrentDefault() {
-  return WindowsVirtualMic::CurrentDefaultCaptureId();
-}
-
-bool DefaultMicControl::MakeWireMicDefault(std::string* previous,
-                                            std::string* error) {
-  return WindowsVirtualMic::MakeCableDefaultCaptureDevice(previous, error);
-}
-
-bool DefaultMicControl::RestoreDefault(const std::string& previous,
-                                        std::string* error) {
-  if (previous.empty()) return false;
-  return WindowsVirtualMic::SetDefaultCaptureById(previous, error);
-}
-
-bool DefaultMicControl::WireMicIsDefault() {
-  return WindowsVirtualMic::IsCableDefaultCaptureDevice();
-}
-
-#else
 
 namespace {
 
@@ -311,6 +281,5 @@ bool DefaultMicControl::WireMicIsDefault() {
   return true;
 }
 
-#endif
 
 }

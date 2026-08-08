@@ -13,12 +13,6 @@
 #include "../components/ToggleSwitch.hpp"
 #include "DefaultMicControl.hpp"
 
-#ifdef _WIN32
-#include <QPointer>
-
-#include "WindowsFirewall.hpp"
-#include "WindowsVirtualMic.hpp"
-#endif
 
 namespace wiremic::ui {
 
@@ -85,7 +79,7 @@ QWidget* MakeComboRow(QWidget* parent, const QString& title,
 
 SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
   // One scroll area around the whole page. Everything here -- toggles, the
-  // Windows card, the trusted list -- has to stay reachable in a short window,
+  // microphone card, the trusted list -- has to stay reachable in a short window,
   // and the previous arrangement simply ran off the bottom edge with no way to
   // get to it.
   auto* pageLayout = new QVBoxLayout(this);
@@ -147,9 +141,6 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
   rootLayout->addWidget(settingsCard);
   rootLayout->addWidget(buildMicrophoneCard(content));
 
-#ifdef _WIN32
-  rootLayout->addWidget(buildWindowsCard(content));
-#endif
 
   auto* trustedTitle = new QLabel("Trusted Devices", content);
   trustedTitle->setStyleSheet(
@@ -268,15 +259,6 @@ QWidget* SettingsPage::buildMicrophoneCard(QWidget* parent) {
                       secondaryRow);
   secondaryLayout->addWidget(restoreMicButton_, 1);
 
-#ifdef _WIN32
-  auto* openPanel = new GlassButton("Sound settings",
-                                     GlassButton::Variant::Secondary,
-                                     secondaryRow);
-  secondaryLayout->addWidget(openPanel, 1);
-  connect(openPanel, &GlassButton::clicked, this, []() {
-    platform::WindowsVirtualMic::OpenSoundControlPanel();
-  });
-#endif
 
   layout->addWidget(secondaryRow);
 
@@ -292,14 +274,6 @@ QWidget* SettingsPage::buildMicrophoneCard(QWidget* parent) {
 void SettingsPage::refreshMicrophoneStatus() {
   if (micStatusLabel_) {
     QString text;
-#ifdef _WIN32
-    if (!platform::WindowsVirtualMic::IsCableInstalled()) {
-      text =
-          "The VB-CABLE virtual audio device is not installed, so no "
-          "application can hear WireMic yet. Re-run the WireMic installer to "
-          "add it.";
-    } else
-#endif
         if (!platform::DefaultMicControl::IsSupported()) {
       text =
           "No audio server is running, so the microphone cannot be published "
@@ -324,34 +298,6 @@ void SettingsPage::refreshMicrophoneStatus() {
         !stored.value(QLatin1String(kPreviousMicKey)).toString().isEmpty());
   }
 
-#ifdef _WIN32
-  if (!firewallStatusLabel_) return;
-  firewallStatusLabel_->setText("Checking network permissions...");
-
-  QPointer<SettingsPage> guard(this);
-  platform::WindowsFirewall::CheckAsync(
-      this, [guard](platform::WindowsFirewall::Status status) {
-        if (!guard || !guard->firewallStatusLabel_) return;
-        switch (status) {
-          case platform::WindowsFirewall::Status::Allowed:
-            guard->firewallStatusLabel_->setText(
-                "Windows Firewall allows WireMic to be found on this network.");
-            break;
-          case platform::WindowsFirewall::Status::Blocked:
-            guard->firewallStatusLabel_->setText(
-                "Windows Firewall is blocking incoming connections, so your "
-                "phone cannot find this computer. Repairing takes one click "
-                "and an administrator prompt.");
-            break;
-          case platform::WindowsFirewall::Status::Unknown:
-            guard->firewallStatusLabel_->setText(
-                "Could not read the Windows Firewall rules. If your phone "
-                "cannot find this computer, repairing the permissions is "
-                "worth a try.");
-            break;
-        }
-      });
-#endif
 }
 
 void SettingsPage::makeVirtualMicDefault() {
@@ -399,51 +345,5 @@ void SettingsPage::restorePreviousMic() {
   refreshMicrophoneStatus();
 }
 
-#ifdef _WIN32
-
-// Windows drops unsolicited inbound datagrams without telling anyone, which
-// looks exactly like the phone not being on the network at all.
-QWidget* SettingsPage::buildWindowsCard(QWidget* parent) {
-  auto* card = new GlassPanel(parent);
-  auto* layout = new QVBoxLayout(card);
-  layout->setContentsMargins(20, 18, 20, 18);
-  layout->setSpacing(12);
-
-  auto* title = new QLabel("Network permissions", card);
-  title->setStyleSheet(
-      "color: rgb(245,246,250); font-size: 16px; font-weight: 700;");
-  layout->addWidget(title);
-
-  firewallStatusLabel_ = MakeStatusLabel(card);
-  layout->addWidget(firewallStatusLabel_);
-
-  auto* repair = new GlassButton("Repair network permissions",
-                                  GlassButton::Variant::Secondary, card);
-  repair->setMinimumHeight(46);
-  layout->addWidget(repair);
-
-  connect(repair, &GlassButton::clicked, this, [this]() { repairFirewall(); });
-
-  refreshWindowsStatus();
-  return card;
-}
-
-void SettingsPage::refreshWindowsStatus() { refreshMicrophoneStatus(); }
-
-void SettingsPage::repairFirewall() {
-  QString error;
-  if (!platform::WindowsFirewall::Repair(&error)) {
-    QMessageBox::warning(this, "Could not repair network permissions", error);
-    return;
-  }
-
-  refreshWindowsStatus();
-  QMessageBox::information(
-      this, "Network permissions repaired",
-      "WireMic is now allowed through Windows Firewall. Your phone should "
-      "find this computer within a few seconds.");
-}
-
-#endif
 
 }

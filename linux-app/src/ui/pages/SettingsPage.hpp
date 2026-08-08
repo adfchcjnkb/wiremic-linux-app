@@ -45,13 +45,6 @@ class SettingsPage : public QWidget {
   QLabel* micStatusLabel_{nullptr};
   GlassButton* restoreMicButton_{nullptr};
 
-#ifdef _WIN32
-  QWidget* buildWindowsCard(QWidget* parent);
-  void refreshWindowsStatus();
-  void repairFirewall();
-
-  QLabel* firewallStatusLabel_{nullptr};
-#endif
 };
 
 }

@@ -18,8 +18,8 @@ struct DefaultMicControl {
   // case the buttons that would call the rest of this are not worth showing.
   [[nodiscard]] static bool IsSupported();
 
-  // An opaque handle for whatever is default right now -- an endpoint id on
-  // Windows, a source name on Linux. Empty when nothing could be read.
+  // An opaque handle for whatever is default right now. Empty when nothing
+  // could be read.
   [[nodiscard]] static std::string CurrentDefault();
 
   // Makes the WireMic microphone the default and reports what was default

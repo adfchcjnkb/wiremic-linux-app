@@ -9,7 +9,7 @@
 
 namespace wiremic::platform {
 
-enum class AudioServerKind { None, PipeWire, PulseAudio, WindowsCable };
+enum class AudioServerKind { None, PipeWire, PulseAudio };
 
 class VirtualMicBackend {
  public:

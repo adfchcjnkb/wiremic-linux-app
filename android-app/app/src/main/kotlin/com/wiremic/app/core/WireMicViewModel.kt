@@ -34,12 +34,12 @@ class WireMicViewModel(application: Application) : AndroidViewModel(application)
     private var started = false
     private var multicastLock: WifiManager.MulticastLock? = null
     private val networkBinder = NetworkBinder(application) {
-        // The socket has to be reopened on the new network, and anything found
-        // over the old one is no longer reachable, so the list starts again.
-        if (started) {
-            _devices.value = emptyList()
-            NativeBridge.nativeRefreshDiscovery()
-        }
+        // Reopen the socket on the new network. The device list is deliberately
+        // left alone: entries expire on their own when a computer stops
+        // answering, and emptying the list here would blank the screen every
+        // time a VPN reconnected, which is exactly when someone is most likely
+        // to be staring at it waiting for something to appear.
+        if (started) NativeBridge.nativeRefreshDiscovery()
     }
 
     fun start() {

@@ -35,16 +35,14 @@ bool IsTunnelInterface(const QNetworkInterface& iface) {
     }
   }
 
-  // On Windows the adapter name is a GUID, so the prefixes above never match
-  // and a VPN would be treated as a LAN. The description is the only readable
-  // identifier there.
+  // Descriptions rather than names, for the virtual adapters that container and
+  // VM tooling create with names this list would not otherwise recognise.
   static const char* const kTunnelWords[] = {
-      "tap-windows", "tap-nordvpn", "wireguard", "openvpn",  "wintun",
-      "vpn",         "tunnel",      "tailscale", "zerotier", "hyper-v",
-      "virtualbox",  "vmware",      "loopback",  "warp",     "cloudflare",
-      "psiphon",     "outline",     "mullvad",   "windscribe", "surfshark",
-      "expressvpn",  "hotspot shield", "proxy",  "singbox",  "sing-box",
-      "v2ray",       "xray",        "hiddify",   "nekoray"};
+      "wireguard", "openvpn",  "vpn",       "tunnel",    "tailscale",
+      "zerotier",  "virtualbox", "vmware",  "warp",      "cloudflare",
+      "psiphon",   "outline",  "mullvad",   "windscribe", "surfshark",
+      "expressvpn", "hotspot shield", "proxy", "singbox", "sing-box",
+      "v2ray",     "xray",     "hiddify",   "nekoray"};
   const QString description = iface.humanReadableName();
   for (const char* word : kTunnelWords) {
     if (description.contains(QLatin1String(word), Qt::CaseInsensitive)) {
@@ -69,23 +67,14 @@ void PinSendsToInterface(platform::socket_t fd, int interfaceIndex) {
   if (fd == platform::kInvalidSocket || interfaceIndex <= 0) return;
 
   const auto index = static_cast<uint32_t>(interfaceIndex);
-#ifdef _WIN32
-  // Winsock wants the index in network byte order for IPv4.
-  const DWORD value = htonl(index);
-#else
   const uint32_t value = htonl(index);
-#endif
   ::setsockopt(fd, IPPROTO_IP, IP_UNICAST_IF,
                platform::AsOptionValue(&value), sizeof(value));
 }
 
 void UnpinSends(platform::socket_t fd) {
   if (fd == platform::kInvalidSocket) return;
-#ifdef _WIN32
-  const DWORD value = 0;
-#else
   const uint32_t value = 0;
-#endif
   ::setsockopt(fd, IPPROTO_IP, IP_UNICAST_IF,
                platform::AsOptionValue(&value), sizeof(value));
 }
@@ -113,11 +102,9 @@ std::vector<DiscoveryService::LanInterface> DiscoveryService::LanInterfaces() {
       lan.address = entry.ip();
       lan.broadcast = entry.broadcast();
 
-      // Qt fills in the broadcast address from the kernel on Unix, but on
-      // Windows GetAdaptersAddresses does not report one and the entry comes
-      // back null. Losing the directed broadcast is what made the phone
-      // invisible there: multicast is routinely dropped by consumer access
-      // points, and 255.255.255.255 only ever leaves by one interface. The
+      // Qt does not always fill this in -- tethering and hotspot interfaces in
+      // particular come back without one -- and losing the directed broadcast
+      // leaves only multicast, which consumer access points routinely drop. The
       // address is derivable from what we do have, so derive it.
       if (lan.broadcast.isNull() &&
           entry.netmask().protocol() == QAbstractSocket::IPv4Protocol) {
@@ -342,8 +329,8 @@ void DiscoveryService::onRebindTimer() {
 
 // Answers whoever was just heard from directly instead of waiting for the next
 // broadcast round. Broadcast is the part of discovery that networks interfere
-// with -- access points drop it, Windows Firewall drops unsolicited inbound
-// datagrams -- and a directed reply means it only has to work in one of the two
+// with -- access points drop it, firewalls drop unsolicited inbound datagrams
+// -- and a directed reply means it only has to work in one of the two
 // directions for the two devices to find each other.
 void DiscoveryService::sendDirectedAnnounce(const QHostAddress& peer) {
   if (!running_ || !bound_) return;
